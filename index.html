@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Cerca Porcini</title>
+  <meta name="description" content="Dove e quando cercare i porcini: gradiente termico, pioggia, timer del micelio e microclima.">
+  <meta name="theme-color" content="#2f6d3c">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    try { const t = localStorage.getItem('cp-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+</head>
+<body data-sheet="half">
+  <header class="appbar">
+    <div class="brand"><img src="icons/icon-192.png" alt=""><span>Cerca Porcini</span></div>
+    <div class="spacer"></div>
+    <span class="net" id="net">online</span>
+    <button class="icon-btn" id="themeBtn" title="Tema chiaro/scuro" aria-label="Cambia tema"></button>
+  </header>
+
+  <div id="map"></div>
+
+  <div class="map-ctrls">
+    <button class="icon-btn" id="locateBtn" title="La mia posizione" aria-label="La mia posizione"></button>
+  </div>
+  <button class="fab" id="fabFind"></button>
+
+  <aside class="panel" id="panel" data-state="half">
+    <button class="sheet-handle" id="sheetHandle" aria-label="Espandi o riduci il pannello"></button>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="analisi" aria-selected="true"></button>
+      <button class="tab" role="tab" data-tab="spot"></button>
+      <button class="tab" role="tab" data-tab="fungaie"></button>
+      <button class="tab" role="tab" data-tab="impostazioni"></button>
+    </nav>
+
+    <!-- ANALISI -->
+    <section class="tab-body" data-body="analisi">
+      <div class="card">
+        <div class="row">
+          <div class="grow">
+            <div class="label">Posizione di partenza (valle di riferimento)</div>
+            <div id="posText" class="small">In attesa del GPS…</div>
+          </div>
+          <button class="btn" id="usePosBtn" title="Usa la posizione GPS"></button>
+        </div>
+        <div class="small muted" style="margin-top:6px">Puoi anche tenere premuto sulla mappa per scegliere un altro punto di partenza.</div>
+      </div>
+
+      <div class="field">
+        <label for="date">Giorno dell’uscita</label>
+        <input type="date" id="date">
+      </div>
+
+      <div class="field">
+        <span class="label">Raggio di ricerca</span>
+        <div class="seg" id="radiusSeg"></div>
+      </div>
+
+      <div class="field">
+        <label for="species">Specie</label>
+        <select id="species">
+          <option value="auto">Automatica in base alla stagione</option>
+          <option value="aestivalis">Boletus aestivalis – Porcino estivo</option>
+          <option value="aereus">Boletus aereus – Porcino nero</option>
+          <option value="edulis">Boletus edulis – Porcino autunnale</option>
+          <option value="pinophilus">Boletus pinophilus – Porcino rosso</option>
+        </select>
+      </div>
+
+      <details class="adv">
+        <summary>Parametri avanzati</summary>
+        <div class="field">
+          <label for="windowDays">Giorni per la media delle temperature: <span class="range-val" id="windowDaysVal"></span></label>
+          <input type="range" id="windowDays" min="1" max="20" step="1">
+        </div>
+        <div class="field">
+          <label for="gradient">Gradiente termico: <span class="range-val" id="gradientVal"></span> °C / 100 m</label>
+          <input type="range" id="gradient" min="0.60" max="0.70" step="0.01">
+        </div>
+      </details>
+
+      <button class="btn primary block" id="runBtn"></button>
+
+      <div id="results"></div>
+    </section>
+
+    <!-- SPOT -->
+    <section class="tab-body" data-body="spot" hidden>
+      <div id="spotList"></div>
+    </section>
+
+    <!-- FUNGAIE -->
+    <section class="tab-body" data-body="fungaie" hidden>
+      <div class="btn-row" style="margin-bottom:12px">
+        <button class="btn primary" id="newFindBtn"></button>
+        <button class="btn" id="syncBtn"></button>
+      </div>
+      <div id="syncStatus" class="small muted" style="margin-bottom:10px"></div>
+      <div id="findList"></div>
+    </section>
+
+    <!-- IMPOSTAZIONI -->
+    <section class="tab-body" data-body="impostazioni" hidden>
+      <h2>Impostazioni</h2>
+      <div class="field">
+        <span class="label">Tema</span>
+        <div class="seg" id="themeSeg">
+          <button data-v="auto">Automatico</button><button data-v="light">Chiaro</button><button data-v="dark">Scuro</button>
+        </div>
+      </div>
+
+      <h3>Regole</h3>
+      <div class="grid2">
+        <div class="field"><label for="rainMinMm">Pioggia minima (mm in 20 gg)</label><input type="number" id="rainMinMm" min="5" max="200"></div>
+        <div class="field"><label for="rainEventMm">Pioggia che avvia il timer (mm)</label><input type="number" id="rainEventMm" min="3" max="80"></div>
+        <div class="field"><label for="southOffsetM">Versante Sud = metri più in basso</label><input type="number" id="southOffsetM" min="0" max="300" step="5"></div>
+        <div class="field"><label for="maxSpots">Numero massimo di spot</label><input type="number" id="maxSpots" min="5" max="60"></div>
+      </div>
+      <div id="learnBox" class="card small"></div>
+
+      <h3>Google Drive</h3>
+      <div class="field">
+        <label for="driveClientId">Client ID OAuth di Google</label>
+        <input type="text" id="driveClientId" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off">
+      </div>
+      <details class="adv">
+        <summary>Come ottenere il Client ID (una volta sola)</summary>
+        <ol class="steps">
+          <li>Apri <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> e crea un progetto (es. “Cerca Porcini”).</li>
+          <li><b>API e servizi → Libreria</b>: abilita <b>Google Drive API</b>.</li>
+          <li><b>Schermata consenso OAuth</b>: tipo “Esterno”, aggiungi il tuo indirizzo Gmail tra gli <b>utenti di test</b>.</li>
+          <li><b>Credenziali → Crea credenziali → ID client OAuth → Applicazione web</b>.</li>
+          <li>In <b>Origini JavaScript autorizzate</b> inserisci: <code id="originHint"></code></li>
+          <li>Copia l’ID client e incollalo qui sopra.</li>
+        </ol>
+        <p class="small muted">L’app usa solo il permesso <code>drive.file</code>: vede esclusivamente la cartella “Cerca Porcini” che crea lei.</p>
+      </details>
+
+      <h3>Offline e dati</h3>
+      <div class="btn-row">
+        <button class="btn" id="exportBtn">Esporta backup</button>
+        <button class="btn" id="importBtn">Importa backup</button>
+      </div>
+      <input type="file" id="importFile" accept="application/json" hidden>
+      <div style="height:8px"></div>
+      <button class="btn block" id="clearTilesBtn">Svuota mappe salvate offline</button>
+      <p class="small muted" id="storageInfo"></p>
+
+      <hr>
+      <p class="small muted">
+        I consigli sono stime basate sulle regole del gradiente termico, della pioggia e del timer del micelio: non garantiscono ritrovamenti.
+        Rispetta la normativa regionale sulla raccolta (tesserino, limiti giornalieri, giorni consentiti) e i regolamenti delle aree protette.
+        Dati: Open-Meteo, AWS Terrain Tiles, © OpenStreetMap, OpenTopoMap, EEA (aree protette).
+      </p>
+      <p class="small muted" id="versionInfo"></p>
+    </section>
+  </aside>
+
+  <!-- Dialog fungaia -->
+  <dialog id="findDlg">
+    <form method="dialog" id="findForm">
+      <div class="dlg-head"><h2 id="findDlgTitle">Nuova fungaia</h2><button class="icon-btn" value="cancel" formnovalidate aria-label="Chiudi" id="findClose"></button></div>
+      <div class="dlg-body">
+        <div class="card small" id="findPos">Rilevo la posizione…</div>
+        <div class="grid2">
+          <div class="field"><label for="fDatetime">Data e ora</label><input type="datetime-local" id="fDatetime" required></div>
+          <div class="field"><label for="fTemp">Temperatura (°C)</label><input type="number" id="fTemp" step="0.1" placeholder="auto"></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label for="fSpecies">Specie</label>
+            <select id="fSpecies">
+              <option value="">Non so / altro</option>
+              <option value="aestivalis">Porcino estivo (aestivalis)</option>
+              <option value="aereus">Porcino nero (aereus)</option>
+              <option value="edulis">Porcino autunnale (edulis)</option>
+              <option value="pinophilus">Porcino rosso (pinophilus)</option>
+            </select>
+          </div>
+          <div class="field"><label for="fQty">Quantità</label><input type="text" id="fQty" placeholder="es. 5 esemplari / 1,2 kg"></div>
+        </div>
+        <div class="field"><label for="fForest">Bosco</label>
+          <select id="fForest">
+            <option value="">Non specificato</option>
+            <option value="quercia">Querce / Castagni</option>
+            <option value="faggio">Faggi / Abeti</option>
+            <option value="misto">Misto</option>
+          </select>
+        </div>
+        <div class="field"><label for="fNotes">Note</label><textarea id="fNotes" placeholder="Accesso, margine del bosco, radura, versante…"></textarea></div>
+        <div class="field">
+          <span class="label">Foto</span>
+          <div class="gallery" id="fGallery"></div>
+          <input type="file" id="fPhotos" accept="image/*" multiple hidden>
+          <input type="file" id="fCamera" accept="image/*" capture="environment" hidden>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button class="btn" value="cancel" formnovalidate>Annulla</button>
+        <button class="btn primary" id="findSave" value="default">Salva fungaia</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog dettaglio -->
+  <dialog id="viewDlg">
+    <div class="dlg-head"><h2 id="viewTitle"></h2><button class="icon-btn" id="viewClose" aria-label="Chiudi"></button></div>
+    <div class="dlg-body" id="viewBody"></div>
+    <div class="dlg-foot">
+      <button class="btn danger" id="viewDelete">Elimina</button>
+      <button class="btn" id="viewMap">Sulla mappa</button>
+      <button class="btn primary" id="viewEdit">Modifica</button>
+    </div>
+  </dialog>
+
+  <div class="progress" id="progress" hidden><div class="box"><b id="progressText">Calcolo…</b><div class="bar"><i id="progressBar"></i></div></div></div>
+  <div class="toast" id="toast"></div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
