@@ -1,6 +1,7 @@
 // Service worker: app disponibile offline + cache delle mappe e dell'altimetria
-const SHELL = 'cp-shell-v2';
-const TILES = 'cp-tiles';
+const SHELL = 'cp-shell-v3';
+// solo risposte CORS: le risposte "opache" Chrome le conta ~7 MB l'una e satura lo spazio del sito
+const TILES = 'cp-tiles-v2';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/config.js', 'js/db.js', 'js/icons.js', 'js/geo.js', 'js/dem.js', 'js/weather.js',
@@ -18,7 +19,7 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
-    for (const k of await caches.keys()) if (k.startsWith('cp-shell-') && k !== SHELL) await caches.delete(k);
+    for (const k of await caches.keys()) if ((k.startsWith('cp-shell-') && k !== SHELL) || k === 'cp-tiles') await caches.delete(k);
     await self.clients.claim();
   })());
 });
@@ -36,7 +37,7 @@ self.addEventListener('fetch', (e) => {
       if (hit) return hit;
       try {
         const res = await fetch(req);
-        if (res.ok || res.type === 'opaque') c.put(req.url, res.clone());
+        if (res.ok && res.type !== 'opaque') c.put(req.url, res.clone());
         return res;
       } catch {
         return new Response('', { status: 504 });

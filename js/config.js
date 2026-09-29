@@ -76,17 +76,17 @@ export const TILE_LAYERS = {
   topo: {
     name: 'Topografica',
     url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-    opts: { maxZoom: 17, subdomains: 'abc', attribution: '© OpenStreetMap, SRTM | © OpenTopoMap (CC-BY-SA)' },
+    opts: { crossOrigin: true, maxZoom: 17, subdomains: 'abc', attribution: '© OpenStreetMap, SRTM | © OpenTopoMap (CC-BY-SA)' },
   },
   osm: {
     name: 'Stradale',
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    opts: { maxZoom: 19, attribution: '© OpenStreetMap contributors' },
+    opts: { crossOrigin: true, maxZoom: 19, attribution: '© OpenStreetMap contributors' },
   },
   sat: {
     name: 'Satellite',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    opts: { maxZoom: 18, attribution: 'Tiles © Esri' },
+    opts: { crossOrigin: true, maxZoom: 18, attribution: 'Tiles © Esri' },
   },
 };
 

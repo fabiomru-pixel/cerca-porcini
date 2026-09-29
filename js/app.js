@@ -334,7 +334,7 @@ async function saveOfflineArea() {
   for (const s of a.spots.slice(0, 20)) addArea(s.lat, s.lon, 1.2, [12, 13, 14, 15]);
   for (const f of state.finds.filter((f) => distKm(a.center, f) <= a.radius)) addArea(f.lat, f.lon, 0.8, [13, 14, 15]);
   const list = [...want].slice(0, 800);
-  const cache = await caches.open('cp-tiles');
+  const cache = await caches.open('cp-tiles-v2');
   let done = 0;
   progress('Salvo le mappe per l’uso offline…', 0);
   const worker = async () => {
@@ -343,8 +343,8 @@ async function saveOfflineArea() {
       const url = tileUrl(layer.url, z, x, y, subs);
       try {
         if (!(await cache.match(url))) {
-          const res = await fetch(url, { mode: 'no-cors' });
-          await cache.put(url, res);
+          const res = await fetch(url, { mode: 'cors' });
+          if (res.ok) await cache.put(url, res);
         }
       } catch { /* salta la tile */ }
       done++;
@@ -556,7 +556,9 @@ async function doSync() {
     renderSyncStatus();
     toast(`Sincronizzato: ${r.total} fungaie, ${r.uploaded} foto caricate`);
   } catch (e) {
-    console.error(e); toast('Sincronizzazione non riuscita: ' + e.message, 5000);
+    console.error(e);
+    const msg = e.name === 'QuotaExceededError' ? 'spazio del browser esaurito: Opzioni → Svuota mappe salvate offline' : (e.message || e.name);
+    toast('Sincronizzazione non riuscita: ' + msg, 6000);
   } finally { progress(null); btn.disabled = false; }
 }
 function renderSyncStatus() {
@@ -687,7 +689,7 @@ function bindUI() {
   $('#exportBtn').onclick = exportBackup;
   $('#importBtn').onclick = () => $('#importFile').click();
   $('#importFile').onchange = async (e) => { try { await importBackup(e.target.files[0]); } catch (err) { toast('Import non riuscito: ' + err.message); } e.target.value = ''; };
-  $('#clearTilesBtn').onclick = async () => { await caches.delete('cp-tiles'); toast('Mappe offline eliminate'); updateStorageInfo(); };
+  $('#clearTilesBtn').onclick = async () => { await caches.delete('cp-tiles-v2'); toast('Mappe offline eliminate'); updateStorageInfo(); };
   $('#versionInfo').textContent = `Versione ${APP_VERSION}`;
 
   const net = () => { const on = navigator.onLine; $('#net').textContent = on ? 'online' : 'offline'; $('#net').classList.toggle('off', !on); if (on) completePending(); };
