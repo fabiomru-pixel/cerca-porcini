@@ -699,6 +699,7 @@ function bindUI() {
 async function init() {
   const saved = await kv.get('settings');
   state.settings = { ...DEFAULT_SETTINGS, ...(saved || {}) };
+  if (!state.settings.driveClientId) state.settings.driveClientId = DEFAULT_SETTINGS.driveClientId;
   applyTheme(state.settings.theme);
   initMap();
   bindUI();

@@ -1,5 +1,5 @@
 // Service worker: app disponibile offline + cache delle mappe e dell'altimetria
-const SHELL = 'cp-shell-v1';
+const SHELL = 'cp-shell-v2';
 const TILES = 'cp-tiles';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',

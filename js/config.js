@@ -14,7 +14,8 @@ export const DEFAULT_SETTINGS = {
   southOffsetM: 175,      // versante Sud percepito 150–200 m più in basso
   maxSpots: 25,
   theme: 'auto',          // auto | light | dark
-  driveClientId: '',
+  // Client ID OAuth pubblico (progetto Google Cloud "cerca-porcini"): non è un segreto
+  driveClientId: '516872585382-51m78latk5r073hl7dftqs6ggj44sstu.apps.googleusercontent.com',
   driveFolderId: '',
   lastSync: null,
 };
