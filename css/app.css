@@ -78,6 +78,14 @@ svg.i { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-widt
 .spot-pin span { transform: rotate(45deg); }
 .find-pin { width: 30px; height: 30px; border-radius: 50%; background: #7a3e12; border: 2px solid #fff; display: grid; place-items: center; box-shadow: 0 3px 8px rgba(0,0,0,.35); }
 .find-pin svg { width: 18px; height: 18px; }
+.car-pin { width: 34px; height: 34px; border-radius: 10px; background: #2563eb; border: 2px solid #fff; display: grid; place-items: center; color: #fff; box-shadow: 0 3px 8px rgba(0,0,0,.35); }
+.car-pin svg { width: 20px; height: 20px; }
+#carBtn.on { background: #2563eb; color: #fff; }
+.car-nav { text-align: center; padding: 6px 0 4px; }
+.compass { position: relative; width: 180px; height: 180px; margin: 0 auto 8px; border-radius: 50%; border: 2px solid var(--border); background: var(--surface-2); display: grid; place-items: center; }
+.compass svg { width: 130px; height: 130px; transition: transform .25s ease-out; }
+.compass .n { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); font-weight: 800; font-size: 13px; color: var(--danger); }
+.car-dist { font-size: 34px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .me-dot { width: 18px; height: 18px; border-radius: 50%; background: #2563eb; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(37,99,235,.25); }
 
 /* ---------- Pannello ---------- */
@@ -140,6 +148,7 @@ details.adv summary { cursor: pointer; padding: 8px 0; font-weight: 600; font-si
   background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
 }
 .btn:hover { filter: brightness(.97); }
+a.btn { text-decoration: none; }
 .btn.primary { background: var(--primary); color: var(--on-primary); border-color: transparent; }
 .btn.danger { color: var(--danger); }
 .btn.block { width: 100%; }

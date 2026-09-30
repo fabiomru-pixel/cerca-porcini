@@ -1,7 +1,7 @@
 // Regole di base (dalle slide) e parametri predefiniti.
 // Tutto ciò che è "regolabile" finisce nelle impostazioni utente (db 'settings').
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
 export const DEFAULT_SETTINGS = {
   gradient: 0.6,          // °C ogni 100 m (regolabile 0,6–0,7)
@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS = {
   rainEventMm: 10,       // un giorno con almeno questi mm avvia/riavvia il timer
   radiusKm: 50,           // 20 / 50 / 70 / 100 / 150
   species: 'auto',        // auto | aestivalis | aereus | edulis | pinophilus
+  aspectPref: 'auto',     // auto | N | NE | E | SE | S | SO | O | NO
   southOffsetM: 175,      // versante Sud percepito 150–200 m più in basso
   maxSpots: 25,
   theme: 'auto',          // auto | light | dark

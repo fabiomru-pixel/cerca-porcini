@@ -36,6 +36,18 @@ export async function fetchDaily(points, { pastDays = 30, forecastDays = 16 } = 
   return out;
 }
 
+// Dati giornalieri storici (archivio Open-Meteo, dal 1940) per un punto e un intervallo di date
+export async function fetchDailyArchive(lat, lon, startDate, endDate) {
+  const p = new URLSearchParams({
+    latitude: lat.toFixed(4), longitude: lon.toFixed(4), daily: DAILY,
+    start_date: startDate, end_date: endDate, timezone: 'Europe/Rome',
+  });
+  const res = await fetch(`${ARCHIVE}?${p}`);
+  if (!res.ok) throw new Error(`Open-Meteo archivio: ${res.status}`);
+  const j = await res.json();
+  return { lat, lon, elevation: j.elevation, days: toDays(j.daily) };
+}
+
 // Temperatura oraria in un punto e in un istante (per le fungaie salvate)
 export async function temperatureAt(lat, lon, when) {
   const d = new Date(when);

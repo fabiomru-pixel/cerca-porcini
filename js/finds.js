@@ -1,7 +1,7 @@
 // Fungaie: salvataggio (anche offline), foto, completamento dati quando torna la rete
 import { finds as fdb, photos as pdb, uid } from './db.js';
 import { terrainAtPoint } from './dem.js';
-import { temperatureAt, fetchDaily } from './weather.js';
+import { temperatureAt, fetchDaily, fetchDailyArchive } from './weather.js';
 import { aspectLabel } from './geo.js';
 import { SPECIES, GROUPS } from './config.js';
 import { rainEpisodes, forestByElevation, forestTempOffset } from './engine.js';
@@ -91,8 +91,15 @@ export async function processPending(settings) {
       if (p.snapshot && !p.terrain) {
         const date = f.datetime.slice(0, 10);
         const ageDays = Math.ceil((Date.now() - new Date(date).getTime()) / 864e5);
+        let w = null;
         if (ageDays <= 85) {
-          const [w] = await fetchDaily([{ lat: f.lat, lon: f.lon }], { pastDays: Math.min(92, ageDays + settings.rainWindowDays + 2), forecastDays: 1 });
+          [w] = await fetchDaily([{ lat: f.lat, lon: f.lon }], { pastDays: Math.min(92, ageDays + settings.rainWindowDays + 2), forecastDays: 1 });
+        } else {
+          // fungaie inserite a posteriori: archivio storico
+          const from = new Date(date + 'T12:00:00'); from.setDate(from.getDate() - settings.rainWindowDays - 2);
+          w = await fetchDailyArchive(f.lat, f.lon, from.toISOString().slice(0, 10), date);
+        }
+        if (w) {
           const idx = w.days.findIndex((d) => d.date === date);
           if (idx > 0) {
             const g = settings.gradient;

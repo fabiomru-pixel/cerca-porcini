@@ -3,7 +3,7 @@ import { GROUPS, FORESTS, SPECIES } from './config.js';
 import { loadMosaic, terrainAtPoint } from './dem.js';
 import { fetchDaily } from './weather.js';
 import { forestRaster, forestPatch, fetchProtected, protectedAt } from './sources.js';
-import { distKm, bboxAround, aspectLabel, metersPerPixel } from './geo.js';
+import { distKm, bboxAround, aspectLabel, metersPerPixel, ASPECT_DEG, angDiff } from './geo.js';
 import { contourLines } from './contours.js';
 import {
   activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey,
@@ -42,6 +42,7 @@ const combine = (place, timing, season, bonus) => place * (0.3 + 0.7 * timing) *
 export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], onStep = () => {} }) {
   const radius = s.radiusKm;
   const center = { lat, lon };
+  const aspectTarget = s.aspectPref && s.aspectPref !== 'auto' ? ASPECT_DEG[s.aspectPref] : null;
   const ahead = daysBetween(todayStr(), date);
   if (ahead > 15) throw new Error('La data può essere al massimo 15 giorni avanti (limite delle previsioni).');
   if (ahead < -60) throw new Error('La data non può essere più di 60 giorni fa.');
@@ -125,6 +126,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const elevation = mosaic.at(px, py);
       if (elevation < 50 || elevation > 2100) continue;
       const { slope, aspect } = mosaic.slopeAspectPx(px, py, saStep);
+      if (aspectTarget != null && (slope < 3 || angDiff(aspect, aspectTarget) > 30)) continue; // esposizione scelta
       const fk = cellForestKey(elevation, forest?.code[k]);
       const w = nearestWeather(grid, byIJ, ll.lat, ll.lon, center);
       const tm = w.timing[fk];
@@ -185,6 +187,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
 
   const final = picked
     .filter((c) => !c.patch || c.patch.frac >= 0.25)
+    // con il terreno di dettaglio l'esposizione può cambiare: tolleranza un po' più larga
+    .filter((c) => aspectTarget == null || (c.slope >= 3 && angDiff(c.aspect, aspectTarget) <= 40))
     .map((c) => {
       const w = nearestWeather(grid, byIJ, c.lat, c.lon, center);
       const code = c.patch ? (c.patch.frac === 0 ? 0 : c.patch.broad >= c.patch.conif ? 1 : 2) : c.code;
@@ -250,7 +254,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   return {
     createdAt: new Date().toISOString(),
     date, center, radius, valleyElev,
-    settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm },
+    settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto' },
     summary, groups, timers, spots: final, overlay, contours,
     protectedFc, forestChecked: !!forest, demZoom: mosaic.z,
   };

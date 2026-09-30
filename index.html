@@ -26,6 +26,7 @@
   <div id="map"></div>
 
   <div class="map-ctrls">
+    <button class="icon-btn" id="carBtn" title="La mia auto" aria-label="La mia auto"></button>
     <button class="icon-btn" id="locateBtn" title="La mia posizione" aria-label="La mia posizione"></button>
   </div>
   <button class="fab" id="fabFind"></button>
@@ -70,6 +71,21 @@
           <option value="aereus">Boletus aereus – Porcino nero</option>
           <option value="edulis">Boletus edulis – Porcino autunnale</option>
           <option value="pinophilus">Boletus pinophilus – Porcino rosso</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="aspectPref">Esposizione del versante</label>
+        <select id="aspectPref">
+          <option value="auto">Automatica (decidono le regole)</option>
+          <option value="N">Nord</option>
+          <option value="NE">Nord-Est</option>
+          <option value="E">Est</option>
+          <option value="SE">Sud-Est</option>
+          <option value="S">Sud</option>
+          <option value="SO">Sud-Ovest</option>
+          <option value="O">Ovest</option>
+          <option value="NO">Nord-Ovest</option>
         </select>
       </div>
 
@@ -168,6 +184,17 @@
       <div class="dlg-head"><h2 id="findDlgTitle">Nuova fungaia</h2><button class="icon-btn" value="cancel" formnovalidate aria-label="Chiudi" id="findClose"></button></div>
       <div class="dlg-body">
         <div class="card small" id="findPos">Rilevo la posizione…</div>
+        <details class="adv" id="coordsBox">
+          <summary>Inserisci le coordinate a mano (fungaie trovate in passato)</summary>
+          <div class="field">
+            <label for="fCoords">Coordinate</label>
+            <div class="row">
+              <input type="text" id="fCoords" class="grow" inputmode="text" autocomplete="off" placeholder="43.77123, 11.25561">
+              <button type="button" class="btn" id="fCoordsApply">Usa</button>
+            </div>
+            <span class="small muted">Formati accettati: <code>43.77123, 11.25561</code> · <code>43,77123 11,25561</code> · <code>43°46'16"N 11°15'20"E</code>. Puoi incollarle da Google Maps o Mapy.com. Ricordati di impostare anche data e ora del ritrovamento.</span>
+          </div>
+        </details>
         <div class="grid2">
           <div class="field"><label for="fDatetime">Data e ora</label><input type="datetime-local" id="fDatetime" required></div>
           <div class="field"><label for="fTemp">Temperatura (°C)</label><input type="number" id="fTemp" step="0.1" placeholder="auto"></div>
@@ -216,6 +243,12 @@
       <button class="btn" id="viewMap">Sulla mappa</button>
       <button class="btn primary" id="viewEdit">Modifica</button>
     </div>
+  </dialog>
+
+  <!-- Dialog auto -->
+  <dialog id="carDlg">
+    <div class="dlg-head"><h2>La mia auto</h2><button class="icon-btn" id="carClose" aria-label="Chiudi"></button></div>
+    <div class="dlg-body" id="carBody"></div>
   </dialog>
 
   <div class="progress" id="progress" hidden><div class="box"><b id="progressText">Calcolo…</b><div class="bar"><i id="progressBar"></i></div></div></div>

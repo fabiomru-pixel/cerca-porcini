@@ -5,7 +5,7 @@ import { runAnalysis } from './analysis.js';
 import { buildGpx, shareOrDownload, download } from './gpx.js';
 import { saveFind, deleteFind, listFinds, processPending, computeLearn } from './finds.js';
 import { syncDrive } from './drive.js';
-import { lon2px, lat2px, distKm } from './geo.js';
+import { lon2px, lat2px, distKm, bearing, fmtDist, parseCoords, ASPECT_NAME } from './geo.js';
 import { addDays } from './engine.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -70,6 +70,7 @@ function initMap() {
   layers.spots = L.layerGroup().addTo(map);
   layers.finds = L.layerGroup().addTo(map);
   layers.me = L.layerGroup().addTo(map);
+  layers.car = L.layerGroup().addTo(map);
   L.control.layers(bases, {
     'Idoneità (calore)': layers.suit,
     'Fascia di quota': layers.contours,
@@ -180,6 +181,7 @@ function renderControls() {
   if (!d.value || d.value < d.min || d.value > d.max) d.value = todayStr();
   $('#radiusSeg').innerHTML = RADIUS_OPTIONS.map((r) => `<button data-v="${r}" aria-pressed="${r === s.radiusKm}">${r} km</button>`).join('');
   $('#species').value = s.species;
+  $('#aspectPref').value = s.aspectPref || 'auto';
   $('#windowDays').value = s.windowDays; $('#windowDaysVal').textContent = `${s.windowDays} gg`;
   $('#gradient').value = s.gradient; $('#gradientVal').textContent = s.gradient.toFixed(2).replace('.', ',');
   for (const k of ['rainMinMm', 'rainEventMm', 'southOffsetM', 'maxSpots']) $('#' + k).value = s[k];
@@ -234,7 +236,11 @@ function renderResults() {
     const status = a.date < t.firstPossible ? 'in attesa' : a.date < t.from ? 'micelio in attivazione' : a.date <= t.to ? '<span class="pill ok">finestra migliore</span>' : 'finestra in chiusura';
     return `<div style="margin-bottom:6px"><b>${FORESTS[fk].label}</b> · ${status}<br>Migliore: <b>${itDate(t.from)} → ${itDate(t.to)}</b> <span class="muted">(primi funghi dal ${itDate(t.firstPossible)}${t.where ? `, pioggia caduta nella zona di ${t.where}` : ', pioggia in valle'})</span></div>`;
   };
-  const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}<div class="muted">Il timer parte dall’ultima pioggia sopra ${state.settings.rainEventMm} mm; ogni spot usa la pioggia caduta nella sua zona.</div></div>`;  const alerts = [];
+  const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}<div class="muted">Il timer parte dall’ultima pioggia sopra ${state.settings.rainEventMm} mm; ogni spot usa la pioggia caduta nella sua zona.</div></div>`;
+  const alerts = [];
+  if (a.settings.aspectPref && a.settings.aspectPref !== 'auto') {
+    alerts.push(`<div class="alert ok">Solo versanti esposti a <b>${ASPECT_NAME[a.settings.aspectPref]}</b> (tolleranza circa ±35°, esclusi i tratti pianeggianti).${a.spots.length < 5 ? ' Pochi spot: prova “Automatica” o un raggio più ampio.' : ''}</div>`);
+  }
   const wetSpots = a.spots.filter((sp) => sp.rainTotal >= state.settings.rainMinMm).length;
   if (!s.rainOk) alerts.push(`<div class="alert ${wetSpots ? 'warn' : 'bad'}">Pioggia in valle insufficiente: ${fmt1(s.rainTotal)} mm in 20 giorni (servono ${state.settings.rainMinMm} mm). ${wetSpots ? `In quota è piovuto di più: ${wetSpots} spot su ${a.spots.length} superano la soglia.` : 'Nemmeno in quota si arriva alla soglia: condizioni non ancora favorevoli.'}</div>`);
   if (s.meanMax > 30) alerts.push('<div class="alert warn">Caldo estremo in valle (medie delle massime oltre 30 °C): cerca in quota e sui versanti Nord.</div>');
@@ -305,7 +311,7 @@ function setBadge(tab, n) {
 
 async function exportGpx() {
   const fs = state.finds;
-  const gpx = buildGpx(state.analysis, fs);
+  const gpx = buildGpx(state.analysis, fs, { car: state.car });
   const r = await shareOrDownload(gpx, `porcini-${state.analysis?.date || todayStr()}.gpx`);
   if (r === 'downloaded') toast('GPX scaricato: aprilo con Mapy.com (Le mie mappe → Importa)', 4000);
 }
@@ -376,6 +382,8 @@ async function openFindForm(id) {
   $('#fQty').value = editing?.quantity || '';
   $('#fForest').value = editing?.forestKey || editing?.forestChoice || '';
   $('#fNotes').value = editing?.notes || '';
+  $('#fCoords').value = '';
+  $('#coordsBox').open = false;
   if (editing) {
     findPos = { lat: editing.lat, lon: editing.lon, acc: editing.accuracy, alt: editing.gpsAlt };
     renderFindPos();
@@ -401,7 +409,7 @@ function bindMapCenter() {
 function renderFindPos() {
   const p = findPos;
   $('#findPos').innerHTML = `<div class="row"><div class="grow">${icon('pin')} <b>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</b>
-    ${p.fromMap ? '<span class="pill">centro mappa</span>' : p.acc ? `<span class="pill ${p.acc < 25 ? 'ok' : 'warn'}">±${Math.round(p.acc)} m</span>` : ''}
+    ${p.manual ? '<span class="pill">coordinate inserite</span>' : p.fromMap ? '<span class="pill">centro mappa</span>' : p.acc ? `<span class="pill ${p.acc < 25 ? 'ok' : 'warn'}">±${Math.round(p.acc)} m</span>` : ''}
     <div class="muted">Quota, esposizione e temperatura vengono calcolate in automatico (anche più tardi, se ora sei offline).</div></div>
     <button type="button" class="btn" id="useMapCenter" title="Usa il centro della mappa">${icon('crosshair')}</button></div>`;
   bindMapCenter();
@@ -616,6 +624,145 @@ async function updateStorageInfo() {
   $('#storageInfo').textContent = `Spazio usato dall’app: ${(e.usage / 1048576).toFixed(1)} MB`;
 }
 
+// ---------------------------------------------------------------- auto parcheggiata
+let carWatch = null, carHere = null, heading = null, carLine = null;
+
+function drawCar() {
+  layers.car.clearLayers(); carLine = null;
+  const c = state.car;
+  $('#carBtn').classList.toggle('on', !!c);
+  if (!c) return;
+  L.marker([c.lat, c.lon], {
+    icon: L.divIcon({ className: '', html: `<div class="car-pin">${icon('car')}</div>`, iconSize: [34, 34], iconAnchor: [17, 17] }),
+  }).on('click', openCar).addTo(layers.car);
+  if (carHere) {
+    carLine = L.polyline([[carHere.lat, carHere.lon], [c.lat, c.lon]], { color: '#2563eb', weight: 3, dashArray: '8 8', interactive: false }).addTo(layers.car);
+  }
+}
+
+async function setCar(pos) {
+  state.car = { lat: pos.lat, lon: pos.lon, acc: pos.acc ?? null, savedAt: new Date().toISOString() };
+  await kv.set('car', state.car);
+  drawCar(); renderCar();
+  if ($('#carDlg').open) startCarTracking();
+  toast('Posizione dell’auto salvata');
+}
+
+function onOrientation(e) {
+  let h = null;
+  if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;          // iPhone
+  else if (e.absolute && typeof e.alpha === 'number') h = (360 - e.alpha) % 360;        // Android
+  if (h == null) return;
+  // compensa la rotazione dello schermo
+  const so = (screen.orientation && screen.orientation.angle) || 0;
+  heading = (h + so) % 360;
+  updateCarArrow();
+}
+
+function startCarTracking() {
+  if (navigator.geolocation && carWatch == null) {
+    carWatch = navigator.geolocation.watchPosition((p) => {
+      carHere = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy };
+      state.gps = { ...carHere, alt: p.coords.altitude };
+      drawMe(); drawCar(); updateCarArrow();
+    }, () => { updateCarArrow(); }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 30000 });
+  }
+  addEventListener('deviceorientationabsolute', onOrientation);
+  addEventListener('deviceorientation', onOrientation);
+}
+function stopCarTracking() {
+  if (carWatch != null) navigator.geolocation.clearWatch(carWatch);
+  carWatch = null; heading = null;
+  removeEventListener('deviceorientationabsolute', onOrientation);
+  removeEventListener('deviceorientation', onOrientation);
+}
+
+const DIR8 = ['Nord', 'Nord-Est', 'Est', 'Sud-Est', 'Sud', 'Sud-Ovest', 'Ovest', 'Nord-Ovest'];
+function updateCarArrow() {
+  const c = state.car, box = $('#carNav');
+  if (!c || !box) return;
+  if (!carHere) { box.innerHTML = '<div class="muted small">Cerco il segnale GPS…</div>'; return; }
+  const d = distKm(carHere, c), b = bearing(carHere, c);
+  const rel = heading == null ? b : (b - heading + 360) % 360;
+  const arrived = d * 1000 <= Math.max(15, (carHere.acc || 0));
+  box.innerHTML = arrived
+    ? `<div class="car-dist">Sei arrivato 🚗</div><div class="muted small">L’auto è entro ${Math.round(Math.max(15, carHere.acc || 0))} m.</div>`
+    : `<div class="compass ${heading == null ? 'north' : ''}">
+        <svg viewBox="0 0 100 100" style="transform:rotate(${rel}deg)"><path d="M50 6 L78 86 L50 70 L22 86 Z" fill="var(--primary)"/></svg>
+        ${heading == null ? '<span class="n">N</span>' : ''}
+      </div>
+      <div class="car-dist">${fmtDist(d)}</div>
+      <div class="small">verso <b>${DIR8[Math.round(b / 45) % 8]}</b> (${Math.round(b)}°) · precisione GPS ±${Math.round(carHere.acc || 0)} m</div>
+      <div class="muted small" style="margin-top:4px">${heading == null ? 'Bussola non disponibile: la freccia indica la direzione rispetto al Nord (in alto).' : 'Tieni il telefono in piano davanti a te e segui la freccia.'}</div>`;
+}
+
+function renderCar() {
+  const c = state.car, body = $('#carBody');
+  if (!body) return;
+  if (!c) {
+    body.innerHTML = `<p>Salva il punto dove hai parcheggiato: nel bosco potrai tornarci seguendo la freccia, anche senza connessione.</p>
+      <div class="btn-row">
+        <button class="btn primary" id="carSetGps">${icon('crosshair')} Sono all’auto</button>
+        <button class="btn" id="carSetMap">${icon('pin')} Centro mappa</button>
+      </div>`;
+    $('#carSetGps').onclick = () => {
+      if (!navigator.geolocation) { toast('GPS non disponibile'); return; }
+      toast('Rilevo la posizione…');
+      navigator.geolocation.getCurrentPosition((p) => setCar({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }),
+        () => toast('Posizione non disponibile: usa “Centro mappa”'), { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+    };
+    $('#carSetMap').onclick = () => { const m = map.getCenter(); setCar({ lat: m.lat, lon: m.lng }); };
+    return;
+  }
+  const since = new Date(c.savedAt);
+  body.innerHTML = `
+    <div id="carNav" class="car-nav"></div>
+    <div class="small muted" style="margin:10px 0">Auto salvata alle ${since.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })} del ${since.toLocaleDateString('it-IT')} · ${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}</div>
+    <div class="btn-row">
+      <a class="btn primary" target="_blank" rel="noopener" id="carRoute">${icon('nav')} Percorso a piedi</a>
+      <button class="btn" id="carShow">${icon('pin')} Sulla mappa</button>
+    </div>
+    <div style="height:8px"></div>
+    <div class="btn-row">
+      <button class="btn" id="carMove">Sposta qui</button>
+      <button class="btn danger" id="carDel">Rimuovi auto</button>
+    </div>`;
+  const updRoute = () => {
+    const from = carHere || state.gps;
+    $('#carRoute').href = `https://mapy.com/fnc/v1/route?${from ? `start=${from.lon},${from.lat}&` : ''}end=${c.lon},${c.lat}&routeType=foot_hiking`;
+  };
+  updRoute();
+  $('#carRoute').onclick = updRoute;
+  $('#carShow').onclick = () => {
+    $('#carDlg').close();
+    const pts = [[c.lat, c.lon]]; if (carHere) pts.push([carHere.lat, carHere.lon]);
+    if (pts.length > 1) map.fitBounds(pts, { padding: [60, 60], maxZoom: 17 }); else map.setView(pts[0], 16);
+    if (innerWidth < 900) setSheet('peek');
+  };
+  $('#carMove').onclick = () => {
+    if (!carHere) { toast('Aspetto il GPS…'); return; }
+    if (confirm('Spostare l’auto nella tua posizione attuale?')) setCar(carHere);
+  };
+  $('#carDel').onclick = async () => {
+    if (!confirm('Rimuovere la posizione dell’auto?')) return;
+    state.car = null; await kv.del('car'); drawCar(); renderCar();
+  };
+  updateCarArrow();
+}
+
+async function openCar() {
+  if (!carHere && state.gps) carHere = { lat: state.gps.lat, lon: state.gps.lon, acc: state.gps.acc };
+  renderCar();
+  $('#carDlg').showModal();
+  if (state.car) {
+    // iPhone: il permesso della bussola va chiesto con un tocco
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try { await DeviceOrientationEvent.requestPermission(); } catch { /* senza bussola */ }
+    }
+    startCarTracking();
+  }
+}
+
 // ---------------------------------------------------------------- tab e pannello
 function switchTab(name) {
   $$('.tab').forEach((t) => t.setAttribute('aria-selected', t.dataset.tab === name));
@@ -638,6 +785,11 @@ function bindUI() {
     const st = $('#panel').dataset.state;
     setSheet(st === 'peek' ? 'half' : st === 'half' ? 'full' : 'peek');
   };
+  $('#carBtn').innerHTML = icon('car');
+  $('#carBtn').onclick = openCar;
+  $('#carClose').innerHTML = icon('x');
+  $('#carClose').onclick = () => $('#carDlg').close();
+  $('#carDlg').addEventListener('close', stopCarTracking);
   $('#locateBtn').innerHTML = icon('crosshair');
   $('#locateBtn').onclick = () => { state.start = null; locate({ center: true }); };
   $('#usePosBtn').innerHTML = icon('crosshair');
@@ -667,6 +819,7 @@ function bindUI() {
     $$('#radiusSeg button').forEach((x) => x.setAttribute('aria-pressed', x === b));
   };
   $('#species').onchange = (e) => saveSettings({ species: e.target.value });
+  $('#aspectPref').onchange = (e) => saveSettings({ aspectPref: e.target.value });
   $('#windowDays').oninput = (e) => { $('#windowDaysVal').textContent = `${e.target.value} gg`; saveSettings({ windowDays: Number(e.target.value) }); };
   $('#gradient').oninput = (e) => { $('#gradientVal').textContent = Number(e.target.value).toFixed(2).replace('.', ','); saveSettings({ gradient: Number(e.target.value) }); };
   for (const k of ['rainMinMm', 'rainEventMm', 'southOffsetM', 'maxSpots']) {
@@ -674,6 +827,17 @@ function bindUI() {
   }
   $('#driveClientId').onchange = async (e) => { await saveSettings({ driveClientId: e.target.value.trim(), driveFolderId: '' }); renderSyncStatus(); };
   $('#originHint').textContent = location.origin;
+
+  const applyCoords = () => {
+    const c = parseCoords($('#fCoords').value);
+    if (!c) { toast('Coordinate non riconosciute: usa ad esempio 43.77123, 11.25561'); return; }
+    stopWatch();
+    findPos = { lat: c.lat, lon: c.lon, acc: null, manual: true };
+    renderFindPos();
+    toast('Posizione impostata dalle coordinate');
+  };
+  $('#fCoordsApply').onclick = applyCoords;
+  $('#fCoords').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); applyCoords(); } };
 
   $('#fPhotos').onchange = (e) => { newPhotos.push(...e.target.files); e.target.value = ''; renderGallery(); };
   $('#fCamera').onchange = (e) => { newPhotos.push(...e.target.files); e.target.value = ''; renderGallery(); };
@@ -712,6 +876,8 @@ async function init() {
   const lastGps = await kv.get('lastGps');
   if (lastGps) { state.gps = lastGps; state.start = { lat: lastGps.lat, lon: lastGps.lon, manual: false }; map.setView([lastGps.lat, lastGps.lon], 10); }
   renderStart(); drawMe();
+  state.car = (await kv.get('car')) || null;
+  drawCar();
 
   state.analysis = await kv.get('lastAnalysis');
   if (state.analysis) { drawAnalysis(state.analysis, !lastGps); renderResults(); }

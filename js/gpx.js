@@ -5,7 +5,7 @@ import { GROUPS } from './config.js';
 const esc = (s) => String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
 const n6 = (v) => Number(v).toFixed(6);
 
-export function buildGpx(analysis, finds = [], { nearKm = 3 } = {}) {
+export function buildGpx(analysis, finds = [], { nearKm = 3, car = null } = {}) {
   const parts = [];
   const name = `Porcini ${analysis ? analysis.date : new Date().toISOString().slice(0, 10)}`;
   parts.push('<?xml version="1.0" encoding="UTF-8"?>');
@@ -25,6 +25,9 @@ export function buildGpx(analysis, finds = [], { nearKm = 3 } = {}) {
       ].filter(Boolean).join('\n');
       parts.push(`<wpt lat="${n6(s.lat)}" lon="${n6(s.lon)}"><ele>${s.elevation}</ele><name>${esc(`${s.id} ★${s.score} ${s.elevation}m`)}</name><desc>${esc(desc)}</desc><sym>Flag, Green</sym><type>Spot consigliato</type></wpt>`);
     }
+  }
+  if (car) {
+    parts.push(`<wpt lat="${n6(car.lat)}" lon="${n6(car.lon)}"><time>${car.savedAt}</time><name>Auto</name><desc>Auto parcheggiata</desc><sym>Parking Area</sym><type>Auto</type></wpt>`);
   }
   for (const f of finds.filter((x) => !x.deleted)) {
     const when = new Date(f.datetime);
