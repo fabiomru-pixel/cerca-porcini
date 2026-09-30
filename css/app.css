@@ -149,6 +149,10 @@ details.adv summary { cursor: pointer; padding: 8px 0; font-weight: 600; font-si
 }
 .btn:hover { filter: brightness(.97); }
 a.btn { text-decoration: none; }
+.nav-row { display: flex; gap: 6px; margin-top: 6px; }
+.nav-row .btn { flex: 1; padding: 10px 6px; font-size: 13.5px; white-space: nowrap; }
+.nav-row .btn.small { padding: 7px 6px; font-size: 12.5px; }
+.leaflet-popup-content .nav-row a.btn { color: var(--text); }
 .btn.primary { background: var(--primary); color: var(--on-primary); border-color: transparent; }
 .btn.danger { color: var(--danger); }
 .btn.block { width: 100%; }

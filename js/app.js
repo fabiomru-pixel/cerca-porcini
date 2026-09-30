@@ -98,6 +98,17 @@ function drawMe() {
   }
 }
 
+// Pulsanti "naviga con…": sul telefono ogni link apre direttamente l'app, se installata
+function navButtons(lat, lon, { walk = false, small = false } = {}) {
+  const from = state.gps;
+  const cls = small ? 'btn small nav-btn' : 'btn nav-btn';
+  const links = [];
+  if (!walk) links.push(['Waze', `https://waze.com/ul?ll=${lat},${lon}&navigate=yes`]);
+  links.push(['Google Maps', `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=${walk ? 'walking' : 'driving'}`]);
+  links.push(['Mapy.com', `https://mapy.com/fnc/v1/route?${from ? `start=${from.lon},${from.lat}&` : ''}end=${lon},${lat}&routeType=${walk ? 'foot_hiking' : 'car_fast'}`]);
+  return `<div class="nav-row">${links.map(([n, u]) => `<a class="${cls}" target="_blank" rel="noopener" href="${u}">${n}</a>`).join('')}</div>`;
+}
+
 function spotPopup(s) {
   const prot = s.protected
     ? `<div class="alert ${s.protected.strict ? 'bad' : 'warn'}" style="margin:8px 0 0">${s.protected.strict ? 'Riserva a protezione integrale: raccolta quasi certamente vietata.' : 'Area protetta: verifica il regolamento prima di raccogliere.'}<br><b>${esc(s.protected.name)}</b></div>` : '';
@@ -108,10 +119,8 @@ function spotPopup(s) {
     <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C · luogo ${s.place} · tempismo ${s.timing}</span><br>
     <span class="muted">${s.species.join(', ')}</span>
     ${prot}${kill}
-    <div class="row" style="margin-top:8px;gap:6px">
-      <a class="btn small" style="padding:6px 10px" target="_blank" rel="noopener" href="https://mapy.com/fnc/v1/route?start=${(state.gps || state.analysis.center).lon},${(state.gps || state.analysis.center).lat}&end=${s.lon},${s.lat}&routeType=car_fast">Portami qui</a>
-      <a class="btn small" style="padding:6px 10px" target="_blank" rel="noopener" href="https://mapy.com/fnc/v1/showmap?mapset=outdoor&center=${s.lon},${s.lat}&zoom=16&marker=true">Mapy.com</a>
-    </div>`;
+    <div class="small muted" style="margin-top:8px">Portami qui con:</div>
+    ${navButtons(s.lat, s.lon, { small: true })}`;
 }
 
 function drawAnalysis(a, fit = false) {
@@ -133,7 +142,7 @@ function drawAnalysis(a, fit = false) {
   for (const s of a.spots) {
     const m = L.marker([s.lat, s.lon], {
       icon: L.divIcon({ className: '', html: `<div class="spot-pin" style="background:${scoreColor(s.score)}${s.protected ? ';border-color:#dc2626' : ''}"><span>${s.score}</span></div>`, iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -30] }),
-    }).bindPopup(spotPopup(s));
+    }).bindPopup(spotPopup(s), { minWidth: 260, maxWidth: 300 });
     m.spotId = s.id;
     m.addTo(layers.spots);
   }
@@ -528,9 +537,8 @@ async function openView(id) {
     ${sn ? `<div class="card small"><b>Condizioni nei giorni prima</b><br>
       T media aria ${fmt1(sn.meanT)} °C (stima al suolo ${fmt1(sn.groundT)} °C) · pioggia 20 gg ${sn.rainTotal} mm${sn.daysSince != null ? ` · ${sn.daysSince} giorni dopo la pioggia` : ''}</div>` : ''}
     ${f.pending ? '<div class="alert warn">Alcuni dati verranno completati appena c’è connessione.</div>' : ''}
-    <div class="row" style="gap:6px">
-      <a class="btn" target="_blank" rel="noopener" href="https://mapy.com/fnc/v1/showmap?mapset=outdoor&center=${f.lon},${f.lat}&zoom=16&marker=true">${icon('nav')} Apri in Mapy.com</a>
-    </div>`;
+    <div class="small muted">Portami qui con:</div>
+    ${navButtons(f.lat, f.lon)}`;
   $$('#viewBody [data-full]').forEach((img) => img.onclick = () => {
     const lb = document.createElement('div'); lb.className = 'lightbox'; lb.innerHTML = `<img src="${img.src}" alt="">`;
     lb.onclick = () => lb.remove(); document.body.appendChild(lb);
@@ -718,21 +726,15 @@ function renderCar() {
   body.innerHTML = `
     <div id="carNav" class="car-nav"></div>
     <div class="small muted" style="margin:10px 0">Auto salvata alle ${since.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })} del ${since.toLocaleDateString('it-IT')} · ${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}</div>
-    <div class="btn-row">
-      <a class="btn primary" target="_blank" rel="noopener" id="carRoute">${icon('nav')} Percorso a piedi</a>
-      <button class="btn" id="carShow">${icon('pin')} Sulla mappa</button>
-    </div>
+    <div class="small muted">Percorso a piedi con:</div>
+    <div id="carRoute"></div>
     <div style="height:8px"></div>
-    <div class="btn-row">
+    <div class="nav-row">
+      <button class="btn" id="carShow">${icon('pin')} Mappa</button>
       <button class="btn" id="carMove">Sposta qui</button>
-      <button class="btn danger" id="carDel">Rimuovi auto</button>
+      <button class="btn danger" id="carDel">Rimuovi</button>
     </div>`;
-  const updRoute = () => {
-    const from = carHere || state.gps;
-    $('#carRoute').href = `https://mapy.com/fnc/v1/route?${from ? `start=${from.lon},${from.lat}&` : ''}end=${c.lon},${c.lat}&routeType=foot_hiking`;
-  };
-  updRoute();
-  $('#carRoute').onclick = updRoute;
+  $('#carRoute').innerHTML = navButtons(c.lat, c.lon, { walk: true });
   $('#carShow').onclick = () => {
     $('#carDlg').close();
     const pts = [[c.lat, c.lon]]; if (carHere) pts.push([carHere.lat, carHere.lon]);
