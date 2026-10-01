@@ -47,7 +47,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const ahead = daysBetween(todayStr(), date);
   if (ahead > 15) throw new Error('La data può essere al massimo 15 giorni avanti (limite delle previsioni).');
   if (ahead < -60) throw new Error('La data non può essere più di 60 giorni fa.');
-  const pastDays = Math.min(92, Math.max(30, -ahead + s.rainWindowDays + 8));
+  // servono ~40 giorni prima della data per il bilancio idrico del suolo
+  const pastDays = Math.min(92, Math.max(45, -ahead + 45));
 
   onStep('Scarico il meteo della tua zona…', 0.05);
   const [ref] = await fetchDaily([center], { pastDays, forecastDays: 16 });
@@ -96,7 +97,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     w.i = grid.pts[k].i; w.j = grid.pts[k].j; byIJ.set(`${w.i},${w.j}`, w);
     // tempismo per tipo di bosco ("lepri" e "diesel"), a una quota rappresentativa
     w.timing = { quercia: evalTiming(w, date, s, 'quercia', 600, learn), faggio: evalTiming(w, date, s, 'faggio', 1250, learn) };
-    w.regime = regimeOf(w.timing.quercia.rainTotal, tc); // pioggia caduta in questa zona
+    // pioggia caduta in questa zona (suolo secco = piogge scarse)
+    w.regime = regimeOf(w.timing.quercia.soil.cls === 'secco' ? 0 : w.timing.quercia.rainTotal, tc);
   });
 
   onStep('Applico le regole al territorio…', 0.58);
@@ -201,7 +203,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const code = c.patch ? (c.patch.frac === 0 ? 0 : c.patch.broad >= c.patch.conif ? 1 : 2) : c.code;
       const fk = cellForestKey(c.elevation, code);
       const tm = evalTiming(w, date, s, fk, c.elevation, learn);
-      const regime = regimeOf(tm.rainTotal, tc);
+      // suolo secco conta come "piogge scarse" anche se nei 20 giorni è caduta la quantità minima
+      const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
       const edge = c.patch && c.patch.frac > 0.3 && c.patch.frac < 0.85 ? 1.08 : 1;
       let best = null;
       for (const g of groups) {
@@ -209,15 +212,26 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         let bonus = edge;
         for (const f of nearFinds) { const d = distKm(c, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
         const fin = combine(pl.score, tm.score, g.weight, bonus);
-        if (!best || fin > best.fin) best = { fin, pl, g };
+        if (!best || fin > best.fin) best = { fin, pl, g, bonus };
       }
+      const raw = Math.round(Math.min(1, best.fin / 1.3) * 100);
       return {
         lat: c.lat, lon: c.lon,
         elevation: Math.round(c.elevation), slope: Math.round(c.slope), aspect: Math.round(c.aspect),
         aspectLabel: aspectLabel(c.aspect, c.slope),
         group: best.g.key,
         species: best.g.species.map((k) => SPECIES[k].common),
-        score: Math.round(Math.min(1, best.fin / 1.3) * 100),
+        // tetto in base all'umidità del suolo: secco max 45, al limite max 65 ("sufficiente")
+        score: Math.min(raw, tm.soil.cap),
+        capped: raw > tm.soil.cap,
+        soil: { theta: Math.round(tm.soil.theta * 100), cls: tm.soil.cls, label: tm.soil.label },
+        parts: {
+          luogo: Math.round(Math.min(1, best.pl.score / 1.3) * 100),
+          suolo: Math.round(tm.soil.theta * 100),
+          timer: Math.round(tm.timer * 100),
+          stagione: Math.round(best.g.weight * 100),
+          bonus: Math.round((best.bonus - 1) * 100),
+        },
         fk,
         wIJ: `${w.i},${w.j}`,
         place: Math.round(Math.min(1, best.pl.score / 1.3) * 100),

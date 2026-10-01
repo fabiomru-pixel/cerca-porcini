@@ -1,7 +1,7 @@
 // Meteo da Open-Meteo (gratuito, senza chiave)
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
-const DAILY = 'temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant';
+const DAILY = 'temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant,et0_fao_evapotranspiration';
 
 function toDays(d) {
   return d.time.map((t, i) => ({
@@ -11,6 +11,7 @@ function toDays(d) {
     rain: d.precipitation_sum[i] ?? 0,
     wind: d.wind_speed_10m_max[i],
     windDir: d.wind_direction_10m_dominant[i],
+    et0: d.et0_fao_evapotranspiration?.[i] ?? null, // evaporazione potenziale (mm/giorno)
   }));
 }
 

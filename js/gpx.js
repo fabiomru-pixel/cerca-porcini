@@ -20,6 +20,7 @@ export function buildGpx(analysis, finds = [], { nearKm = 3, car = null } = {}) 
         `${s.forest}${s.forestType ? ' (' + s.forestType + ')' : ''}${s.edge ? ', margine/radura' : ''}`,
         `Specie: ${s.species.join(', ')}`,
         `T stimata al suolo ${s.tLocal} °C; pioggia 20 gg ${s.rainTotal} mm` + (s.daysSince != null ? `; ${s.daysSince} gg dalla pioggia` : ''),
+        s.soil ? `Suolo: ${s.soil.label} (${s.soil.theta}%)${s.capped ? ', punteggio limitato' : ''}` : '',
         s.regime ? `Situazione: ${{ A: 'secco o caldo', B: 'umido e fresco', C: 'intermedia' }[s.regime]}` : '',
         s.killers.length ? `Attenzione: ${s.killers.join(', ')}` : '',
         s.protected ? `AREA PROTETTA: ${s.protected.name} – verifica il regolamento` : '',

@@ -73,6 +73,7 @@ export function summarize(days, dateStr, s) {
   return {
     idx, date: dateStr, meanMax, meanMin, meanT: (meanMax + meanMin) / 2,
     rainTotal, rainOk: rainTotal >= s.rainMinMm, episodes: eps,
+    soilTheta: soilMoisture(days, idx),
     lastEpisode: eps[eps.length - 1] || null,
     rainSeries: rainDays.map((d) => ({ date: d.date, rain: d.rain ?? 0 })),
     windowDays: win.map((d) => ({ date: d.date, tmax: d.tmax, tmin: d.tmin })),
@@ -215,8 +216,42 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
     sc *= Math.pow(0.4, killers.length);
     if (sc > best.score) best = { score: sc, daysSince, killers, total: e.total };
   }
-  const rainFactor = rainTotal >= s.rainMinMm ? 1 : clamp(rainTotal / s.rainMinMm, 0, 1) * 0.5;
-  return { score: best.score * rainFactor, timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm, daysSince: best.daysSince, killers: best.killers };
+  const soil = soilState(days, idx, rainTotal, s);
+  return {
+    score: best.score * soil.factor, timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
+    daysSince: best.daysSince, killers: best.killers, soil,
+  };
+}
+
+// ---------- Bilancio idrico del suolo ----------
+// "Secchio" di 50 mm (lettiera + primi cm di terreno): la pioggia lo riempie, l'evaporazione lo svuota,
+// più lentamente quando è già asciutto. Si parte 40 giorni prima con il secchio a metà.
+export const SOIL = { capacity: 50, kc: 0.8, spinup: 40, start: 0.4 };
+export const SOIL_CLASSES = {
+  umido:  { label: 'Suolo umido', factor: 1, cap: 100 },
+  limite: { label: 'Al limite (sufficiente)', factor: 0.75, cap: 65 },
+  secco:  { label: 'Suolo secco', factor: 0.4, cap: 45 },
+};
+
+export function soilMoisture(days, idx) {
+  const cap = SOIL.capacity;
+  let w = cap * SOIL.start;
+  const from = Math.max(0, idx - SOIL.spinup);
+  for (let i = from; i < idx; i++) {
+    const d = days[i];
+    // senza dato di evaporazione: stima grezza dalla temperatura media
+    const et = d.et0 ?? Math.max(0.3, 0.17 * ((d.tmax + d.tmin) / 2) - 0.6);
+    w = Math.min(cap, w + (d.rain ?? 0));
+    w = Math.max(0, w - SOIL.kc * et * Math.sqrt(w / cap));
+  }
+  return w / cap;
+}
+
+export function soilState(days, idx, rainTotal, s) {
+  const theta = soilMoisture(days, idx);
+  let cls = theta >= 0.5 ? 'umido' : theta >= 0.3 ? 'limite' : 'secco';
+  if (rainTotal < s.rainMinMm) cls = 'secco'; // la regola dei 30 mm in 20 giorni resta valida
+  return { theta, cls, ...SOIL_CLASSES[cls] };
 }
 
 // Finestra di date consigliata (dall'ultimo episodio di pioggia valido)

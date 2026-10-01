@@ -110,6 +110,21 @@ function navButtons(lat, lon, { walk = false, small = false } = {}) {
   return `<div class="nav-row">${links.map(([n, u]) => `<a class="${cls}" target="_blank" rel="noopener" href="${u}">${n}</a>`).join('')}</div>`;
 }
 
+// Dettaglio del punteggio: cosa lo alza e cosa lo abbassa
+const SOIL_PILL = { umido: 'ok', limite: 'warn', secco: 'bad' };
+function scoreBreakdown(s) {
+  if (!s.parts) return '';
+  const p = s.parts;
+  return `<div class="breakdown">
+      <span>Luogo <b>${p.luogo}</b></span>
+      <span>Suolo <b class="pill ${SOIL_PILL[s.soil.cls]}">${p.suolo}% · ${s.soil.cls === 'limite' ? 'al limite' : s.soil.cls}</b></span>
+      <span>Timer <b>${p.timer}</b></span>
+      <span>Stagione <b>${p.stagione}</b></span>
+      ${p.bonus ? `<span>Bonus <b>+${p.bonus}%</b></span>` : ''}
+    </div>
+    ${s.capped ? `<div class="small" style="color:var(--warn)">Punteggio limitato a ${s.score}: ${s.soil.cls === 'secco' ? 'suolo secco (max 45)' : 'suolo al limite, sufficiente (max 65)'}.</div>` : ''}`;
+}
+
 function spotPopup(s) {
   const prot = s.protected
     ? `<div class="alert ${s.protected.strict ? 'bad' : 'warn'}" style="margin:8px 0 0">${s.protected.strict ? 'Riserva a protezione integrale: raccolta quasi certamente vietata.' : 'Area protetta: verifica il regolamento prima di raccogliere.'}<br><b>${esc(s.protected.name)}</b></div>` : '';
@@ -119,6 +134,7 @@ function spotPopup(s) {
     ${esc(s.forest)}${s.forestType ? ` <span class="muted">(${esc(s.forestType)})</span>` : ''}${s.edge ? ' · margine/radura' : ''}<br>
     <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C · luogo ${s.place} · tempismo ${s.timing}</span><br>
     ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()} · pioggia 20 gg ${s.rainTotal} mm</span><br>` : ''}
+    ${scoreBreakdown(s)}
     <span class="muted">${s.species.join(', ')}</span>
     ${prot}${kill}
     <div class="small muted" style="margin-top:8px">Portami qui con:</div>
@@ -238,7 +254,19 @@ function situationCard(a) {
       <div style="margin-top:8px">Temperatura in valle ${fmt1(s.meanT)} °C ${tLabel}<br>
         <span class="muted">Normale del periodo ${fmt1(c.normal)} °C (${esc(c.source)}, zona ${esc(c.zoneLabel)}) · elevata oltre ${fmt1(c.high)} °C · massime anomale oltre ${fmt1(c.maxAnom)} °C (ora ${fmt1(s.meanMax)} °C)</span></div>
       <div style="margin-top:6px" class="muted">Spot per situazione (dipende dalla pioggia caduta in ciascuna zona): secco/caldo ${counts.A} · umido/fresco ${counts.B} · intermedia ${counts.C}</div>
+      ${soilLine(a)}
     </div>`;
+}
+
+// Umidità del suolo: bilancio pioggia − evaporazione degli ultimi 40 giorni
+function soilLine(a) {
+  if (a.summary.soilTheta == null) return '';
+  const sc = { umido: 0, limite: 0, secco: 0 };
+  for (const sp of a.spots) if (sp.soil) sc[sp.soil.cls]++;
+  const th = Math.round(a.summary.soilTheta * 100);
+  return `<div style="margin-top:8px"><b>Umidità del suolo</b> (pioggia − evaporazione): in valle ${th}%
+    <span class="pill ${th >= 50 ? 'ok' : th >= 30 ? 'warn' : 'bad'}">${th >= 50 ? 'umido' : th >= 30 ? 'al limite' : 'secco'}</span><br>
+    <span class="muted">Spot: umido ${sc.umido} · al limite ${sc.limite} (max 65 punti) · secco ${sc.secco} (max 45 punti)</span></div>`;
 }
 
 function renderResults() {
@@ -322,7 +350,7 @@ function renderSpots() {
         <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.nearFind ? '<span class="pill ok">vicino a una tua fungaia</span>' : ''}</div>
         <div class="m">${esc(s.forest)}${s.forestType ? ` (${esc(s.forestType)})` : ''}${s.edge ? ' · margine' : ''} · pendenza ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km</div>
         <div class="m">T suolo ${fmt1(s.tLocal)} °C · luogo ${s.place} · tempismo ${s.timing}${s.daysSince != null ? ` · ${s.daysSince} gg da pioggia` : ''}</div>
-        ${s.regime ? `<div class="m">${REGIMES[s.regime].label} · pioggia 20 gg ${s.rainTotal} mm</div>` : ''}
+        ${s.regime ? `<div class="m">${REGIMES[s.regime].label} · pioggia 20 gg ${s.rainTotal} mm${s.soil ? ` · ${esc(s.soil.label.toLowerCase())} (${s.soil.theta}%)` : ''}</div>` : ''}
         ${s.protected ? `<div class="m" style="color:var(--danger)">${s.protected.strict ? 'Riserva integrale' : 'Area protetta'}: ${esc(s.protected.name)}</div>` : ''}
         ${s.killers.length ? `<div class="m" style="color:var(--warn)">Timer fermo: ${s.killers.join(', ')}</div>` : ''}
       </div>

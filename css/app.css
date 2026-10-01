@@ -149,6 +149,9 @@ details.adv summary { cursor: pointer; padding: 8px 0; font-weight: 600; font-si
 }
 .btn:hover { filter: brightness(.97); }
 a.btn { text-decoration: none; }
+.breakdown { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0 2px; font-size: 12.5px; color: var(--muted); }
+.breakdown b { color: var(--text); }
+.breakdown .pill { font-size: 11.5px; padding: 0 6px; }
 .nav-row { display: flex; gap: 6px; margin-top: 6px; }
 .nav-row .btn { flex: 1; padding: 10px 6px; font-size: 13.5px; white-space: nowrap; }
 .nav-row .btn.small { padding: 7px 6px; font-size: 12.5px; }
