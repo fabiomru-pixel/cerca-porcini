@@ -15,8 +15,11 @@ function toDays(d) {
   }));
 }
 
-// Dati giornalieri per più punti (una richiesta ogni 40 punti)
-export async function fetchDaily(points, { pastDays = 30, forecastDays = 16 } = {}) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Dati giornalieri per più punti (una richiesta ogni 40 punti).
+// Il servizio gratuito ha un limite di richieste al minuto: se risponde 429 aspetto e riprovo.
+export async function fetchDaily(points, { pastDays = 30, forecastDays = 16, onWait } = {}) {
   const out = [];
   for (let i = 0; i < points.length; i += 40) {
     const chunk = points.slice(i, i + 40);
@@ -28,8 +31,15 @@ export async function fetchDaily(points, { pastDays = 30, forecastDays = 16 } = 
       forecast_days: forecastDays,
       timezone: 'Europe/Rome',
     });
-    const res = await fetch(`${FORECAST}?${p}`);
-    if (!res.ok) throw new Error(`Open-Meteo: ${res.status}`);
+    let res;
+    for (let attempt = 0; ; attempt++) {
+      res = await fetch(`${FORECAST}?${p}`);
+      if (res.status !== 429 || attempt >= 4) break;
+      const wait = 20 * (attempt + 1);
+      onWait?.(wait);
+      await sleep(wait * 1000);
+    }
+    if (!res.ok) throw new Error(res.status === 429 ? 'Open-Meteo: troppe richieste in poco tempo, riprova tra qualche minuto' : `Open-Meteo: ${res.status}`);
     let j = await res.json();
     if (!Array.isArray(j)) j = [j];
     j.forEach((r, k) => out.push({ lat: chunk[k].lat, lon: chunk[k].lon, elevation: r.elevation, days: toDays(r.daily) }));

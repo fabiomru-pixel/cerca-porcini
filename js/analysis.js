@@ -14,8 +14,10 @@ import {
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
 
 function weatherGrid(lat, lon, radiusKm) {
-  // maglia fitta: i temporali sono locali (5 km fino a 20 km di raggio, 8 km fino a 50…)
-  const step = radiusKm <= 20 ? 5 : radiusKm <= 50 ? 8 : radiusKm <= 100 ? 12 : 15;
+  // maglia fitta (i temporali sono locali), ma al massimo ~100 punti per restare nei limiti del servizio
+  // gratuito: con raggi grandi la maglia si allarga, poi le aree migliori ricevono il loro meteo puntuale
+  const base = radiusKm <= 20 ? 5 : radiusKm <= 50 ? 8 : 12;
+  const step = Math.max(base, radiusKm * Math.sqrt(Math.PI / 100));
   const dLat = step / 111.32, dLon = step / (111.32 * Math.cos((lat * Math.PI) / 180));
   const n = Math.ceil(radiusKm / step);
   const pts = [];
@@ -54,7 +56,10 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const pastDays = Math.min(92, Math.max(45, -ahead + 45));
 
   onStep('Scarico il meteo della tua zona…', 0.05);
-  const [ref] = await fetchDaily([center], { pastDays, forecastDays: 16 });
+  // solo i giorni che servono: meno dati = meno "peso" sul limite del servizio gratuito
+  const fDays = Math.max(1, ahead + 1);
+  const onWait = (sec) => onStep(`Il servizio meteo chiede una pausa: riprovo tra ${sec} secondi…`, 0.45);
+  const [ref] = await fetchDaily([center], { pastDays, forecastDays: fDays, onWait });
   const summary = summarize(ref.days, date, s);
 
   onStep('Scarico l’altimetria…', 0.1);
@@ -94,15 +99,15 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
 
   onStep('Scarico il meteo in quota…', 0.45);
   const grid = weatherGrid(lat, lon, radius);
-  const wx = await fetchDaily(grid.pts, { pastDays, forecastDays: 16 });
+  const wx = await fetchDaily(grid.pts, { pastDays, forecastDays: fDays, onWait });
   const byIJ = new Map();
-  wx.forEach((w, k) => {
-    w.i = grid.pts[k].i; w.j = grid.pts[k].j; byIJ.set(`${w.i},${w.j}`, w);
+  const prepWeather = (w) => {
     // tempismo per tipo di bosco ("lepri" e "diesel"), a una quota rappresentativa
     w.timing = { quercia: evalTiming(w, date, s, 'quercia', 600, learn), faggio: evalTiming(w, date, s, 'faggio', 1250, learn) };
     // pioggia caduta in questa zona (suolo secco = piogge scarse)
     w.regime = regimeOf(w.timing.quercia.soil.cls === 'secco' ? 0 : w.timing.quercia.rainTotal, tc);
-  });
+  };
+  wx.forEach((w, k) => { w.i = grid.pts[k].i; w.j = grid.pts[k].j; byIJ.set(`${w.i},${w.j}`, w); prepWeather(w); });
 
   onStep('Applico le regole al territorio…', 0.58);
   await new Promise((r) => setTimeout(r, 30));
@@ -165,9 +170,9 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const overlay = { url: canvas.toDataURL('image/png'), bounds: [[se.lat, nw.lon], [nw.lat, se.lon]] };
 
   // valutazione di un punto (usata nella scansione fine)
-  const scoreCell = (ll, elevation, slope, aspect, code, edgeBonus) => {
+  const scoreCell = (ll, elevation, slope, aspect, code, edgeBonus, areaW) => {
     const fk = cellForestKey(elevation, code);
-    const w = nearestWeather(grid, byIJ, ll.lat, ll.lon, center);
+    const w = areaW || nearestWeather(grid, byIJ, ll.lat, ll.lon, center);
     const tm = w.timing[fk];
     let bonus = edgeBonus;
     for (const f of nearFinds) { const d = distKm(ll, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
@@ -226,8 +231,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
           const mfr = sum / n;
           if (mfr > 0.35 && mfr < 0.85) edge = 1.08;
         }
-        const r = scoreCell(ll, elevation, slope, aspect, codes ? codes[k] : c.code, edge);
-        cells.push({ lat: ll.lat, lon: ll.lon, elevation, slope, aspect, code: codes ? codes[k] : c.code, fine: true, ...r });
+        const r = scoreCell(ll, elevation, slope, aspect, codes ? codes[k] : c.code, edge, c.w);
+        cells.push({ lat: ll.lat, lon: ll.lon, elevation, slope, aspect, code: codes ? codes[k] : c.code, fine: true, w: c.w, ...r });
       }
     }
     // i 3 punti migliori dell'area, ad almeno 400 m l'uno dall'altro
@@ -249,6 +254,14 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     if (areas.length >= nAreas) break;
     if (areas.every((p) => distKm(p, c) >= 1.5)) areas.push(c);
   }
+
+  // meteo puntuale al centro di ogni area (la maglia larga dei raggi grandi non basta per la pioggia)
+  onStep('Scarico il meteo puntuale delle aree migliori…', 0.66);
+  try {
+    const aw = await fetchDaily(areas.map((c) => ({ lat: c.lat, lon: c.lon })), { pastDays, forecastDays: fDays, onWait });
+    aw.forEach((w, k) => { prepWeather(w); areas[k].w = w; });
+  } catch (e) { console.warn('meteo aree', e); /* resta la maglia larga */ }
+  const allWx = [...wx, ...areas.map((c) => c.w).filter(Boolean)];
 
   // 2ª passata: scansione fine di ogni area
   const refined = [];
@@ -283,14 +296,26 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
 
   onStep('Controllo le aree protette…', 0.92);
   let protectedFc = null;
-  try { protectedFc = await fetchProtected(bboxAround(lat, lon, radius)); } catch { protectedFc = null; }
+  // con raggi grandi scarico le aree protette solo attorno a spot e fungaie (risposta più leggera)
+  let pbb = bboxAround(lat, lon, radius);
+  if (radius > 60) {
+    const pts = [...picked, ...finds.filter((f) => f.lat != null && distKm(center, f) <= radius)];
+    if (pts.length) {
+      const m = 0.06; // ~5 km di margine
+      pbb = {
+        south: Math.min(...pts.map((p) => p.lat)) - m, north: Math.max(...pts.map((p) => p.lat)) + m,
+        west: Math.min(...pts.map((p) => p.lon)) - m * 1.4, east: Math.max(...pts.map((p) => p.lon)) + m * 1.4,
+      };
+    }
+  }
+  try { protectedFc = await fetchProtected(pbb); } catch { protectedFc = null; }
 
   const final = picked
     .filter((c) => !c.patch || c.patch.frac >= 0.25)
     // con il terreno di dettaglio l'esposizione può cambiare: tolleranza un po' più larga
     .filter((c) => aspectTarget == null || (c.slope >= 3 && angDiff(c.aspect, aspectTarget) <= 40))
     .map((c) => {
-      const w = nearestWeather(grid, byIJ, c.lat, c.lon, center);
+      const w = c.w || nearestWeather(grid, byIJ, c.lat, c.lon, center);
       const code = c.patch ? (c.patch.frac === 0 ? 0 : c.patch.broad >= c.patch.conif ? 1 : 2) : c.code;
       const fk = cellForestKey(c.elevation, code);
       const tm = evalTiming(w, date, s, fk, c.elevation, learn);
@@ -323,7 +348,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
           bonus: Math.round((best.bonus - 1) * 100),
         },
         fk,
-        wIJ: `${w.i},${w.j}`,
+        _w: w,
         place: Math.round(luogo * 100),
         timing: Math.round(tm.timer * 100),
         tLocal: Math.round(best.pl.tLocal * 10) / 10,
@@ -346,11 +371,11 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const timers = {};
   for (const fk of ['quercia', 'faggio']) {
     const top = final.find((sp) => sp.fk === fk);
-    const w = top ? byIJ.get(top.wIJ) : null;
+    const w = top ? top._w : null;
     const t = w ? bestDates(summarize(w.days, date, s), fk, learn) : null;
     timers[fk] = t ? { ...t, where: top.id } : bestDates(summary, fk, learn);
   }
-  for (const sp of final) { delete sp.wIJ; }
+  for (const sp of final) { delete sp._w; }
 
   // Zone: partendo dallo spot migliore, gli spot entro 2 km da lui -> un'area compatta da girare in una sola uscita
   const zoneOf = new Map();
@@ -404,7 +429,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       // timer personale: i giorni ideali di questa fungaia diventano il centro della finestra
       const ideal = placeIdealDays({ ...place, forestKey: fk, elevation }, learn);
       const learnF = { ...learn, timer: { ...(learn?.timer || {}), [fk]: ideal.idealDays - TIMER_CENTER[fk] } };
-      const w = nearestWeather(grid, byIJ, place.lat, place.lon, center);
+      const w = allWx.reduce((b, x) => (distKm(place, x) < distKm(place, b) ? x : b), allWx[0]);
       const tm = evalTiming(w, date, s, fk, elevation, learnF);
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
       let best = null;

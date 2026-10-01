@@ -1,7 +1,7 @@
 // Regole di base (dalle slide) e parametri predefiniti.
 // Tutto ciò che è "regolabile" finisce nelle impostazioni utente (db 'settings').
 
-export const APP_VERSION = '1.7.0';
+export const APP_VERSION = '1.7.1';
 
 export const DEFAULT_SETTINGS = {
   gradient: 0.6,          // °C ogni 100 m (regolabile 0,6–0,7)
@@ -9,7 +9,7 @@ export const DEFAULT_SETTINGS = {
   rainWindowDays: 20,     // finestra per la pioggia cumulata
   rainMinMm: 30,          // pioggia minima nei 20 giorni precedenti
   rainEventMm: 10,       // un giorno con almeno questi mm avvia/riavvia il timer
-  radiusKm: 50,           // 20 / 50 / 70 / 100 / 150
+  radiusKm: 50,           // 5–200 km (barra)
   species: 'auto',        // auto | aestivalis | aereus | edulis | pinophilus
   aspectPref: 'auto',     // auto | N | NE | E | SE | S | SO | O | NO
   southOffsetM: 175,      // versante Sud percepito 150–200 m più in basso
@@ -71,7 +71,6 @@ export const KILLERS = {
   tramontanaDirs: [315, 60], // settore da NO a ENE
 };
 
-export const RADIUS_OPTIONS = [20, 50, 70, 100, 150];
 
 export const TILE_LAYERS = {
   topo: {

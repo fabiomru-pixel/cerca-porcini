@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, RADIUS_OPTIONS, TILE_LAYERS, GROUPS, SPECIES, FORESTS, APP_VERSION } from './config.js';
+import { DEFAULT_SETTINGS, TILE_LAYERS, GROUPS, SPECIES, FORESTS, APP_VERSION } from './config.js';
 import { kv, finds as fdb, photos as pdb } from './db.js';
 import { icon } from './icons.js';
 import { runAnalysis } from './analysis.js';
@@ -95,6 +95,17 @@ function initMap() {
   });
 }
 
+// cerchio del raggio scelto attorno al punto di partenza (anteprima mentre si trascina la barra)
+let radiusCircle = null, radiusFitT = null;
+function drawRadiusPreview(km, fit = false) {
+  if (radiusCircle) { radiusCircle.remove(); radiusCircle = null; }
+  if (!state.start) return;
+  radiusCircle = L.circle([state.start.lat, state.start.lon], {
+    radius: km * 1000, color: '#2563eb', weight: 2, dashArray: '6 6', fillOpacity: 0.04, interactive: false,
+  }).addTo(map);
+  if (fit) { clearTimeout(radiusFitT); radiusFitT = setTimeout(() => map.fitBounds(radiusCircle.getBounds(), { padding: [20, 20] }), 250); }
+}
+
 function drawMe() {
   layers.me.clearLayers();
   if (state.gps) {
@@ -153,6 +164,7 @@ function spotPopup(s) {
 
 function drawAnalysis(a, fit = false) {
   layers.suit.clearLayers(); layers.contours.clearLayers(); layers.prot.clearLayers(); layers.spots.clearLayers();
+  if (radiusCircle) { radiusCircle.remove(); radiusCircle = null; } // l'analisi disegna già il suo cerchio
   if (!a) return;
   L.imageOverlay(a.overlay.url, a.overlay.bounds, { opacity: 0.55, interactive: false }).addTo(layers.suit);
   L.circle([a.center.lat, a.center.lon], { radius: a.radius * 1000, color: '#64748b', weight: 1.5, dashArray: '6 6', fill: false, interactive: false }).addTo(layers.suit);
@@ -226,7 +238,8 @@ function renderControls() {
   const d = $('#date');
   d.min = todayStr(); d.max = addDays(todayStr(), 15);
   if (!d.value || d.value < d.min || d.value > d.max) d.value = todayStr();
-  $('#radiusSeg').innerHTML = RADIUS_OPTIONS.map((r) => `<button data-v="${r}" aria-pressed="${r === s.radiusKm}">${r} km</button>`).join('');
+  const r = Math.min(200, Math.max(5, Math.round((s.radiusKm || 50) / 5) * 5));
+  $('#radius').value = r; $('#radiusVal').textContent = `${r} km`;
   $('#species').value = s.species;
   $('#aspectPref').value = s.aspectPref || 'auto';
   $('#windowDays').value = s.windowDays; $('#windowDaysVal').textContent = `${s.windowDays} gg`;
@@ -1029,11 +1042,13 @@ function bindUI() {
   };
   $$('#themeSeg button').forEach((b) => b.onclick = async () => { await saveSettings({ theme: b.dataset.v }); applyTheme(b.dataset.v); });
 
-  $('#radiusSeg').onclick = async (e) => {
-    const b = e.target.closest('button'); if (!b) return;
-    await saveSettings({ radiusKm: Number(b.dataset.v) });
-    $$('#radiusSeg button').forEach((x) => x.setAttribute('aria-pressed', x === b));
+  // raggio: mentre trascini vedi il cerchio sulla mappa attorno al punto di partenza
+  $('#radius').oninput = (e) => {
+    const r = Number(e.target.value);
+    $('#radiusVal').textContent = `${r} km`;
+    drawRadiusPreview(r, true);
   };
+  $('#radius').onchange = (e) => { saveSettings({ radiusKm: Number(e.target.value) }); };
   $('#species').onchange = (e) => saveSettings({ species: e.target.value });
   $('#aspectPref').onchange = (e) => saveSettings({ aspectPref: e.target.value });
   $('#windowDays').oninput = (e) => { $('#windowDaysVal').textContent = `${e.target.value} gg`; saveSettings({ windowDays: Number(e.target.value) }); };
