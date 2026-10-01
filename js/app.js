@@ -134,9 +134,11 @@ function spotPopup(s) {
   const prot = s.protected
     ? `<div class="alert ${s.protected.strict ? 'bad' : 'warn'}" style="margin:8px 0 0">${s.protected.strict ? 'Riserva a protezione integrale: raccolta quasi certamente vietata.' : 'Area protetta: verifica il regolamento prima di raccogliere.'}<br><b>${esc(s.protected.name)}</b></div>` : '';
   const kill = s.killers.length ? `<div class="alert warn" style="margin:8px 0 0">Timer fermato da: ${s.killers.join(', ')}</div>` : '';
+  const z = s.zone ? (state.analysis?.zones || []).find((x) => x.id === s.zone) : null;
+  const zoneTxt = z ? `<div class="small" style="margin:2px 0 4px"><span class="pill zone">Zona ${z.id}</span> ${z.count} spot entro 2 km · giro ~${fmt1(z.tourKm)} km in linea d'aria: ${z.spots.join(' → ')}</div>` : '';
   const fung = s.fungaia ? `<div class="small" style="margin:2px 0 4px"><span class="pill ok">La tua fungaia</span> ${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}<br>
     <span class="muted">Timer di questa fungaia: ideale ${s.idealDays} giorni dopo la pioggia${s.daysSince != null ? ` · oggi ${s.daysSince} gg dalla pioggia` : ''}</span></div>` : '';
-  return `<b>${s.id} · ${s.score}/100</b><br>${fung}
+  return `<b>${s.id} · ${s.score}/100</b><br>${fung}${zoneTxt}
     ${s.elevation} m · esposizione ${s.aspectLabel} · pendenza ${s.slope}°<br>
     ${esc(s.forest)}${s.forestType ? ` <span class="muted">(${esc(s.forestType)})</span>` : ''}${s.edge ? ' · margine/radura' : ''}<br>
     <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C</span><br>
@@ -258,6 +260,17 @@ async function run() {
   }
 }
 
+// Zone con più spot vicini: ideali per un giro nella stessa uscita
+function zonesCard(a) {
+  const zs = (a.zones || []).slice(0, 5);
+  if (!zs.length) return a.scan ? '<p class="small muted">Nessuna zona con più spot entro 2 km: gli spot migliori sono sparsi.</p>' : '';
+  return `<h3>Zone migliori per un giro</h3>
+    ${zs.map((z) => `<div class="card click zone-card" data-zone="${z.id}">
+      <div class="row"><span class="pill zone">Zona ${z.id}</span><b class="grow">${z.count} spot · migliore ${z.best} · media ${z.mean}</b></div>
+      <div class="small muted" style="margin-top:4px">Giro: ${z.spots.join(' → ')} · ~${fmt1(z.tourKm)} km in linea d'aria tra gli spot</div>
+    </div>`).join('')}`;
+}
+
 // Situazione del bosco (A secco/caldo, B umido/fresco, C intermedia) rispetto al clima normale del periodo
 function situationCard(a) {
   if (!a.clim) return '';
@@ -343,6 +356,7 @@ function renderResults() {
       <div class="muted">Quota di partenza: ${a.valleyElev} m · gradiente ${a.settings.gradient.toFixed(2).replace('.', ',')} °C/100 m</div>
     </div>
     ${alerts.join('')}
+    ${zonesCard(a)}
     ${situationCard(a)}
     <h3>Fascia di quota consigliata</h3>
     ${groups}
@@ -357,6 +371,12 @@ function renderResults() {
     </div>
     <p class="small muted">Analisi del ${new Date(a.createdAt).toLocaleString('it-IT')}${age >= 6 ? ' · <b>ricalcola per dati aggiornati</b>' : ''}</p>`;
   $('#gpxBtn').onclick = exportGpx;
+  $$('.zone-card').forEach((c) => c.onclick = () => {
+    const z = a.zones.find((x) => x.id === c.dataset.zone);
+    const pts = z.spots.map((id) => a.spots.find((sp) => sp.id === id)).filter(Boolean).map((sp) => [sp.lat, sp.lon]);
+    map.fitBounds(pts, { padding: [70, 70], maxZoom: 15 });
+    if (innerWidth < 900) setSheet('peek');
+  });
   $('#offlineBtn').onclick = saveOfflineArea;
   setBadge('spot', a.spots.length + (a.fungaie?.length || 0));
 }
@@ -372,7 +392,7 @@ function renderSpots() {
     <div class="card click spot${s.fungaia ? ' fung' : ''}" data-id="${s.id}">
       <div class="score" style="background:${scoreColor(s.score)}">${s.score}</div>
       <div>
-        <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.fungaia ? `<span class="pill ok">la tua fungaia · ${s.nPos}×</span>` : s.nearFind ? '<span class="pill ok">vicino a una tua fungaia</span>' : ''}</div>
+        <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.zone ? `<span class="pill zone">Zona ${s.zone}</span> ` : ''}${s.fungaia ? `<span class="pill ok">la tua fungaia · ${s.nPos}×</span>` : s.nearFind ? '<span class="pill ok">vicino a una tua fungaia</span>' : ''}</div>
         <div class="m">${esc(s.forest)}${s.forestType ? ` (${esc(s.forestType)})` : ''}${s.edge ? ' · margine' : ''} · pendenza ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km</div>
         <div class="m">T suolo ${fmt1(s.tLocal)} °C · luogo ${s.place} · tempismo ${s.timing}${s.daysSince != null ? ` · ${s.daysSince} gg da pioggia` : ''}</div>
         ${s.regime ? `<div class="m">${REGIMES[s.regime].label} · pioggia 20 gg ${s.rainTotal} mm${s.soil ? ` · ${esc(s.soil.label.toLowerCase())} (${s.soil.theta}%)` : ''}</div>` : ''}

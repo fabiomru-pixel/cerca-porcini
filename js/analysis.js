@@ -14,7 +14,8 @@ import {
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
 
 function weatherGrid(lat, lon, radiusKm) {
-  const step = radiusKm <= 20 ? 8 : radiusKm <= 50 ? 12 : radiusKm <= 100 ? 20 : 25;
+  // maglia fitta: i temporali sono locali (5 km fino a 20 km di raggio, 8 km fino a 50…)
+  const step = radiusKm <= 20 ? 5 : radiusKm <= 50 ? 8 : radiusKm <= 100 ? 12 : 15;
   const dLat = step / 111.32, dLon = step / (111.32 * Math.cos((lat * Math.PI) / 180));
   const n = Math.ceil(radiusKm / step);
   const pts = [];
@@ -163,32 +164,120 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const nw = mosaic.toLatLon(0, 0), se = mosaic.toLatLon(OW * stride, OH * stride);
   const overlay = { url: canvas.toDataURL('image/png'), bounds: [[se.lat, nw.lon], [nw.lat, se.lon]] };
 
-  // selezione spot distanziati, con una quota per ciascun gruppo attivo
-  onStep('Seleziono gli spot migliori…', 0.7);
-  cands.sort((a, b) => b.fin - a.fin);
-  const minD = Math.max(1.2, radius / 12);
-  const picked = [];
-  const perGroup = Math.ceil((s.maxSpots * 1.6) / groups.length);
-  for (const g of groups) {
-    const mine = [];
-    for (const c of cands) {
-      if (mine.length >= perGroup) break;
-      if (c.g.key !== g.key) continue;
-      if ([...picked, ...mine].every((p) => distKm(p, c) >= minD)) mine.push(c);
+  // valutazione di un punto (usata nella scansione fine)
+  const scoreCell = (ll, elevation, slope, aspect, code, edgeBonus) => {
+    const fk = cellForestKey(elevation, code);
+    const w = nearestWeather(grid, byIJ, ll.lat, ll.lon, center);
+    const tm = w.timing[fk];
+    let bonus = edgeBonus;
+    for (const f of nearFinds) { const d = distKm(ll, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
+    let best = null;
+    for (const g of groups) {
+      const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime }, ctx, g.key);
+      const fin = combine(pl.score, tm, g.weight, bonus);
+      if (!best || fin > best.fin) best = { fin, pl, tm, g };
     }
-    picked.push(...mine);
+    return { fk, ...best };
+  };
+
+  // 2ª passata su un'area: terreno ~15 m, boschi 10 m, un punto ogni ~30 m entro 1,2 km
+  const refineArea = async (c) => {
+    const R = 1.2;
+    const m = await loadMosaic(c.lat, c.lon, R, { maxTiles: 4, maxZoom: 13 });
+    const mppF = metersPerPixel(c.lat, m.z);
+    const st = Math.max(1, Math.round(30 / mppF));
+    const FW = Math.ceil(m.W / st), FH = Math.ceil(m.H / st);
+    let frac = null, codes = null;
+    try {
+      const f = await forestRaster(m.z, m.ox, m.oy, m.ox + FW * st, m.oy + FH * st, FW * 2, FH * 2);
+      frac = new Float32Array(FW * FH); codes = new Uint8Array(FW * FH);
+      for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) {
+        let b = 0, cf = 0;
+        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+          const v = f.codes[(y * 2 + dy) * f.w + x * 2 + dx];
+          if (v === 1) b++; else if (v === 2) cf++;
+        }
+        frac[y * FW + x] = (b + cf) / 4;
+        codes[y * FW + x] = b + cf === 0 ? 0 : b >= cf ? 1 : 2;
+      }
+    } catch { /* senza carta dei boschi di dettaglio: tengo il giudizio della prima passata */ }
+    const saF = Math.max(1, Math.round(45 / mppF));
+    const cells = [];
+    for (let fy = 0; fy < FH; fy++) {
+      for (let fx = 0; fx < FW; fx++) {
+        const px = fx * st, py = fy * st;
+        const ll = m.toLatLon(px, py);
+        if (distKm(c, ll) > R || distKm(center, ll) > radius) continue;
+        const k = fy * FW + fx;
+        if (frac && frac[k] < 0.5) continue;
+        const elevation = m.at(px, py);
+        if (elevation < 50 || elevation > 2100) continue;
+        const { slope, aspect } = m.slopeAspectPx(px, py, saF);
+        if (aspectTarget != null && (slope < 3 || angDiff(aspect, aspectTarget) > 30)) continue;
+        // margini e radure: bosco presente ma non uniforme nei ~150 m attorno
+        let edge = 1;
+        if (frac) {
+          let sum = 0, n = 0;
+          for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+            const xx = fx + dx, yy = fy + dy;
+            if (xx < 0 || yy < 0 || xx >= FW || yy >= FH) continue;
+            sum += frac[yy * FW + xx]; n++;
+          }
+          const mfr = sum / n;
+          if (mfr > 0.35 && mfr < 0.85) edge = 1.08;
+        }
+        const r = scoreCell(ll, elevation, slope, aspect, codes ? codes[k] : c.code, edge);
+        cells.push({ lat: ll.lat, lon: ll.lon, elevation, slope, aspect, code: codes ? codes[k] : c.code, fine: true, ...r });
+      }
+    }
+    // i 3 punti migliori dell'area, ad almeno 400 m l'uno dall'altro
+    cells.sort((a, b) => b.fin - a.fin);
+    const out = [];
+    for (const x of cells) {
+      if (out.length >= 3) break;
+      if (out.every((o) => distKm(o, x) >= 0.4)) out.push(x);
+    }
+    return out.length ? out : [c];
+  };
+
+  // 1ª passata: le aree più promettenti (anche vicine tra loro: conta solo la qualità)
+  onStep('Seleziono le aree più promettenti…', 0.66);
+  cands.sort((a, b) => b.fin - a.fin);
+  const areas = [];
+  const nAreas = Math.min(90, s.maxSpots * 3);
+  for (const c of cands) {
+    if (areas.length >= nAreas) break;
+    if (areas.every((p) => distKm(p, c) >= 1.5)) areas.push(c);
   }
 
-  // dettaglio: terreno ad alta risoluzione e bosco nell'intorno di ogni spot
-  onStep('Affino quota, esposizione e bosco…', 0.78);
+  // 2ª passata: scansione fine di ogni area
+  const refined = [];
   let done = 0;
-  const queue = [...picked];
-  await Promise.all(Array.from({ length: 6 }, async () => {
+  const queue = [...areas];
+  await Promise.all(Array.from({ length: 4 }, async () => {
     while (queue.length) {
       const c = queue.shift();
-      try { const t = await terrainAtPoint(c.lat, c.lon); if (t.elevation > 0) Object.assign(c, t); } catch { /* resta il dato a bassa risoluzione */ }
+      try { refined.push(...(await refineArea(c))); } catch { refined.push(c); }
+      onStep(`Analisi di dettaglio delle aree migliori… ${++done}/${areas.length}`, 0.66 + (done / areas.length) * 0.22);
+    }
+  }));
+
+  // i migliori in assoluto: unica regola, almeno 400 m tra uno spot e l'altro
+  refined.sort((a, b) => b.fin - a.fin);
+  const picked = [];
+  for (const r of refined) {
+    if (picked.length >= Math.ceil(s.maxSpots * 1.4)) break;
+    if (picked.every((p) => distKm(p, r) >= 0.4)) picked.push(r);
+  }
+
+  // bosco nell'intorno di ogni spot (tipo e copertura per la scheda)
+  onStep('Verifico il bosco attorno agli spot…', 0.89);
+  const queue2 = [...picked];
+  await Promise.all(Array.from({ length: 6 }, async () => {
+    while (queue2.length) {
+      const c = queue2.shift();
+      if (!c.fine) { try { const t = await terrainAtPoint(c.lat, c.lon); if (t.elevation > 0) Object.assign(c, t); } catch { /* dato della prima passata */ } }
       try { c.patch = await forestPatch(c.lat, c.lon); } catch { c.patch = null; }
-      onStep('Affino quota, esposizione e bosco…', 0.78 + (++done / picked.length) * 0.12);
     }
   }));
 
@@ -263,6 +352,41 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   }
   for (const sp of final) { delete sp.wIJ; }
 
+  // Zone: partendo dallo spot migliore, gli spot entro 2 km da lui -> un'area compatta da girare in una sola uscita
+  const zoneOf = new Map();
+  let zi = 0;
+  for (const sp of final) { // final è già ordinato dal migliore
+    if (zoneOf.has(sp.id)) continue;
+    zoneOf.set(sp.id, zi);
+    for (const o of final) if (!zoneOf.has(o.id) && distKm(sp, o) <= 2) zoneOf.set(o.id, zi);
+    zi++;
+  }
+  const zones = [];
+  for (let z = 0; z < zi; z++) {
+    const ms = final.filter((sp) => zoneOf.get(sp.id) === z).sort((a, b) => b.score - a.score);
+    if (ms.length < 2) continue;
+    // giro: dal migliore, sempre verso lo spot più vicino non ancora visto
+    const order = [ms[0]], rest = ms.slice(1);
+    let km = 0;
+    while (rest.length) {
+      const last = order[order.length - 1];
+      rest.sort((a, b) => distKm(last, a) - distKm(last, b));
+      km += distKm(last, rest[0]); order.push(rest.shift());
+    }
+    zones.push({
+      spots: order.map((sp) => sp.id), count: ms.length, best: ms[0].score,
+      mean: Math.round(ms.reduce((a, sp) => a + sp.score, 0) / ms.length),
+      tourKm: Math.round(km * 10) / 10,
+      lat: ms.reduce((a, sp) => a + sp.lat, 0) / ms.length, lon: ms.reduce((a, sp) => a + sp.lon, 0) / ms.length,
+    });
+  }
+  // ordine: zone con spot migliori e più numerosi prima
+  zones.sort((a, b) => (b.best + b.mean * 0.5 + b.count * 3) - (a.best + a.mean * 0.5 + a.count * 3));
+  zones.forEach((z, i) => {
+    z.id = String.fromCharCode(65 + (i % 26));
+    for (const sid of z.spots) { const sp = final.find((x) => x.id === sid); sp.zone = z.id; }
+  });
+
   // Le tue fungaie nel raggio: sempre valutate nel punto esatto, con il timer imparato da ciascuna
   onStep('Valuto le tue fungaie…', 0.94);
   const fungaie = [];
@@ -331,7 +455,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     createdAt: new Date().toISOString(),
     date, center, radius, valleyElev,
     settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto' },
-    summary, groups, timers, spots: final, fungaie, overlay, contours,
+    summary, groups, timers, spots: final, fungaie, zones, overlay, contours,
+    scan: { areas: areas.length, fine: true },
     protectedFc, forestChecked: !!forest, demZoom: mosaic.z,
     clim, tc,
   };
