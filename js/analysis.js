@@ -7,7 +7,7 @@ import { distKm, bboxAround, aspectLabel, metersPerPixel, ASPECT_DEG, angDiff } 
 import { contourLines } from './contours.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
 import {
-  activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey,
+  activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore,
 } from './engine.js';
 
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
@@ -38,7 +38,8 @@ function colorFor(score, groupKey) {
 }
 
 // Combina luogo, tempismo, stagione e bonus personali
-const combine = (place, timing, season, bonus) => place * (0.3 + 0.7 * timing) * season * bonus;
+// Combina luogo (con bonus margini/fungaie, max 1), suolo, timer e stagione: vedi finalScore
+const combine = (place, tm, season, bonus) => finalScore(Math.min(1, place * bonus), tm.soil.factor, tm.timer, season);
 
 export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], onStep = () => {} }) {
   const radius = s.radiusKm;
@@ -147,11 +148,11 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime }, ctx, g.key);
-        const fin = combine(pl.score, tm.score, g.weight, bonus);
+        const fin = combine(pl.score, tm, g.weight, bonus);
         if (!best || fin > best.fin) best = { fin, pl, tm, g };
       }
       img.set(colorFor(best.pl.score * best.g.weight, best.g.key), k * 4);
-      if (best.fin > 0.2) cands.push({ lat: ll.lat, lon: ll.lon, elevation, slope, aspect, fk, code: forest?.code[k] ?? null, ...best });
+      if (best.fin > 0.04) cands.push({ lat: ll.lat, lon: ll.lon, elevation, slope, aspect, fk, code: forest?.code[k] ?? null, ...best });
     }
   }
 
@@ -211,31 +212,30 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         const pl = evalPlace({ elevation: c.elevation, slope: c.slope, aspect: c.aspect, forestKey: fk, regime }, ctx, g.key);
         let bonus = edge;
         for (const f of nearFinds) { const d = distKm(c, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
-        const fin = combine(pl.score, tm.score, g.weight, bonus);
+        const fin = combine(pl.score, tm, g.weight, bonus);
         if (!best || fin > best.fin) best = { fin, pl, g, bonus };
       }
-      const raw = Math.round(Math.min(1, best.fin / 1.3) * 100);
+      const luogo = Math.min(1, best.pl.score * best.bonus);
       return {
         lat: c.lat, lon: c.lon,
         elevation: Math.round(c.elevation), slope: Math.round(c.slope), aspect: Math.round(c.aspect),
         aspectLabel: aspectLabel(c.aspect, c.slope),
         group: best.g.key,
         species: best.g.species.map((k) => SPECIES[k].common),
-        // tetto in base all'umidità del suolo: secco max 45, al limite max 65 ("sufficiente")
-        score: Math.min(raw, tm.soil.cap),
-        capped: raw > tm.soil.cap,
+        score: Math.round(best.fin * 100),
         soil: { theta: Math.round(tm.soil.theta * 100), cls: tm.soil.cls, label: tm.soil.label },
+        // fattori 0–100 che compongono il voto
         parts: {
-          luogo: Math.round(Math.min(1, best.pl.score / 1.3) * 100),
-          suolo: Math.round(tm.soil.theta * 100),
+          luogo: Math.round(luogo * 100),
+          suolo: Math.round(tm.soil.factor * 100),
           timer: Math.round(tm.timer * 100),
           stagione: Math.round(best.g.weight * 100),
           bonus: Math.round((best.bonus - 1) * 100),
         },
         fk,
         wIJ: `${w.i},${w.j}`,
-        place: Math.round(Math.min(1, best.pl.score / 1.3) * 100),
-        timing: Math.round(tm.score * 100),
+        place: Math.round(luogo * 100),
+        timing: Math.round(tm.timer * 100),
         tLocal: Math.round(best.pl.tLocal * 10) / 10,
         forest: FORESTS[fk].label,
         forestType: c.patch ? `${c.patch.type}, copertura ${Math.round(c.patch.frac * 100)}%` : null,

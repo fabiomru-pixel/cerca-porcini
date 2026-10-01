@@ -116,13 +116,11 @@ function scoreBreakdown(s) {
   if (!s.parts) return '';
   const p = s.parts;
   return `<div class="breakdown">
-      <span>Luogo <b>${p.luogo}</b></span>
-      <span>Suolo <b class="pill ${SOIL_PILL[s.soil.cls]}">${p.suolo}% · ${s.soil.cls === 'limite' ? 'al limite' : s.soil.cls}</b></span>
+      <span>Luogo <b>${p.luogo}</b>${p.bonus ? ` <span class="muted">(bonus +${p.bonus}%)</span>` : ''}</span>
+      <span>Suolo <b>${p.suolo}</b> <b class="pill ${SOIL_PILL[s.soil.cls]}">umidità ${s.soil.theta}%</b></span>
       <span>Timer <b>${p.timer}</b></span>
       <span>Stagione <b>${p.stagione}</b></span>
-      ${p.bonus ? `<span>Bonus <b>+${p.bonus}%</b></span>` : ''}
-    </div>
-    ${s.capped ? `<div class="small" style="color:var(--warn)">Punteggio limitato a ${s.score}: ${s.soil.cls === 'secco' ? 'suolo secco (max 45)' : 'suolo al limite, sufficiente (max 65)'}.</div>` : ''}`;
+    </div>`;
 }
 
 function spotPopup(s) {
@@ -132,7 +130,7 @@ function spotPopup(s) {
   return `<b>${s.id} · ${s.score}/100</b><br>
     ${s.elevation} m · esposizione ${s.aspectLabel} · pendenza ${s.slope}°<br>
     ${esc(s.forest)}${s.forestType ? ` <span class="muted">(${esc(s.forestType)})</span>` : ''}${s.edge ? ' · margine/radura' : ''}<br>
-    <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C · luogo ${s.place} · tempismo ${s.timing}</span><br>
+    <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C</span><br>
     ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()} · pioggia 20 gg ${s.rainTotal} mm</span><br>` : ''}
     ${scoreBreakdown(s)}
     <span class="muted">${s.species.join(', ')}</span>
@@ -266,7 +264,8 @@ function soilLine(a) {
   const th = Math.round(a.summary.soilTheta * 100);
   return `<div style="margin-top:8px"><b>Umidità del suolo</b> (pioggia − evaporazione): in valle ${th}%
     <span class="pill ${th >= 50 ? 'ok' : th >= 30 ? 'warn' : 'bad'}">${th >= 50 ? 'umido' : th >= 30 ? 'al limite' : 'secco'}</span><br>
-    <span class="muted">Spot: umido ${sc.umido} · al limite ${sc.limite} (max 65 punti) · secco ${sc.secco} (max 45 punti)</span></div>`;
+    <span class="muted">Spot: umido ${sc.umido} · al limite ${sc.limite} · secco ${sc.secco}</span></div>
+    <div style="margin-top:8px" class="muted">Voto = Luogo × Suolo<sup>1,2</sup> × Timer<sup>0,8</sup> × Stagione<sup>0,5</sup>, ogni fattore da 0 a 1: 100 solo se sono tutti al massimo.</div>`;
 }
 
 function renderResults() {

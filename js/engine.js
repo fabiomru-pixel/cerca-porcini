@@ -145,8 +145,11 @@ export function evalPlace(cell, ctx, groupKey) {
   const slopeS = slopeFactor(cell.slope, cell.regime || 'C');
   const expoPref = 1 + expoBonus(cell.aspect, cell.regime || 'C') * expoFactor;
 
-  // la quota nasce dal calcolo termico: la fascia tipica del bosco è solo un indizio (peso ridotto)
-  const score = clamp(thermal * (0.75 + 0.25 * band) * slopeS * expoPref, 0, 1.3);
+  // la quota nasce dal calcolo termico: la fascia tipica del bosco è solo un indizio (peso ridotto).
+  // Pendenza ed esposizione sono riportate a 0–1 dividendo per il loro massimo nella situazione:
+  // il "luogo" vale 1 solo se temperatura, fascia, pendenza ed esposizione sono tutte ideali.
+  const terrainMax = cell.regime === 'A' || cell.regime === 'B' ? 1.15 * 1.25 : 1;
+  const score = clamp((thermal * (0.75 + 0.25 * band) * slopeS * expoPref) / terrainMax, 0, 1);
   return { score, tLocal, thermal, band, slopeS, expoPref, expoC, forestC, forestKey: cell.forestKey || forestByElevation(cell.elevation).key };
 }
 
@@ -218,9 +221,22 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   }
   const soil = soilState(days, idx, rainTotal, s);
   return {
-    score: best.score * soil.factor, timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
+    timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
     daysSince: best.daysSince, killers: best.killers, soil,
   };
+}
+
+// ---------- Punteggio finale ----------
+// Prodotto pesato di fattori 0–1: basta un fattore debole per abbassare il voto,
+// 100 solo quando luogo, suolo, timer e stagione sono tutti al massimo.
+//   Luogo^1 × Suolo^1,2 × Timer'^0,8 × Stagione^0,5   (Timer' = 0,15 + 0,85 × timer)
+export const SCORE_WEIGHTS = { luogo: 1, suolo: 1.2, timer: 0.8, stagione: 0.5 };
+export function finalScore(luogo, suolo, timer, stagione) {
+  const W = SCORE_WEIGHTS;
+  return Math.pow(clamp(luogo, 0, 1), W.luogo)
+    * Math.pow(clamp(suolo, 0, 1), W.suolo)
+    * Math.pow(0.15 + 0.85 * clamp(timer, 0, 1), W.timer)
+    * Math.pow(clamp(stagione, 0, 1), W.stagione);
 }
 
 // ---------- Bilancio idrico del suolo ----------
@@ -228,10 +244,15 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
 // più lentamente quando è già asciutto. Si parte 40 giorni prima con il secchio a metà.
 export const SOIL = { capacity: 50, kc: 0.8, spinup: 40, start: 0.4 };
 export const SOIL_CLASSES = {
-  umido:  { label: 'Suolo umido', factor: 1, cap: 100 },
-  limite: { label: 'Al limite (sufficiente)', factor: 0.75, cap: 65 },
-  secco:  { label: 'Suolo secco', factor: 0.4, cap: 45 },
+  umido:  { label: 'Suolo umido' },
+  limite: { label: 'Suolo al limite' },
+  secco:  { label: 'Suolo secco' },
 };
+
+// Fattore suolo continuo (0–1) dall'umidità: 70% e oltre = ideale, poi cala sempre più in fretta
+export function moistureFactor(theta) {
+  return piecewise(theta, [[0, 0.05], [0.2, 0.2], [0.35, 0.5], [0.5, 0.8], [0.7, 1]]);
+}
 
 export function soilMoisture(days, idx) {
   const cap = SOIL.capacity;
@@ -250,8 +271,10 @@ export function soilMoisture(days, idx) {
 export function soilState(days, idx, rainTotal, s) {
   const theta = soilMoisture(days, idx);
   let cls = theta >= 0.5 ? 'umido' : theta >= 0.3 ? 'limite' : 'secco';
-  if (rainTotal < s.rainMinMm) cls = 'secco'; // la regola dei 30 mm in 20 giorni resta valida
-  return { theta, cls, ...SOIL_CLASSES[cls] };
+  let factor = moistureFactor(theta);
+  // la regola dei 30 mm in 20 giorni resta valida: sotto soglia il suolo conta come secco
+  if (rainTotal < s.rainMinMm) { cls = 'secco'; factor = Math.min(factor, moistureFactor(0.25)); }
+  return { theta, cls, factor, ...SOIL_CLASSES[cls] };
 }
 
 // Finestra di date consigliata (dall'ultimo episodio di pioggia valido)
