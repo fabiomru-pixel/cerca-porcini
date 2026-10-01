@@ -1,6 +1,7 @@
 // Sincronizzazione con Google Drive (cartella "Cerca Porcini", permesso drive.file:
 // l'app vede solo i file che crea lei, non il resto del tuo Drive)
 import { finds as fdb, photos as pdb } from './db.js';
+import { normalizeFind } from './finds.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const API = 'https://www.googleapis.com/drive/v3';
@@ -98,9 +99,12 @@ export async function syncDrive(settings, saveSettings, onStep = () => {}) {
   }
 
   onStep('Carico le foto…');
-  for (const f of map.values()) {
+  for (const raw of map.values()) {
+    const f = normalizeFind(raw);
+    if (f !== raw) map.set(f.id, f);
     let touched = false;
-    for (const ph of f.photos || []) {
+    const allPhotos = (f.visits || []).flatMap((v) => v.photos || []);
+    for (const ph of allPhotos) {
       const rec = await pdb.get(ph.id);
       if (!ph.driveId && rec?.blob) {
         ph.driveId = await uploadFile({ name: `${ph.id}.jpg`, parent: photoDir, blob: rec.blob });
@@ -113,7 +117,8 @@ export async function syncDrive(settings, saveSettings, onStep = () => {}) {
         await pdb.put({ id: ph.id, findId: f.id, blob, thumb, driveId: ph.driveId, createdAt: f.createdAt });
       }
     }
-    if (touched) { f.updatedAt = new Date().toISOString(); await fdb.put(f); }
+    if (touched) f.updatedAt = new Date().toISOString();
+    if (touched || f !== raw) await fdb.put(f);
   }
 
   onStep('Salvo l’archivio su Drive…');

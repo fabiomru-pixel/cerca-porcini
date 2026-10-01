@@ -33,17 +33,18 @@ export function buildGpx(analysis, finds = [], { nearKm = 3, car = null } = {}) 
     parts.push(`<wpt lat="${n6(car.lat)}" lon="${n6(car.lon)}"><time>${car.savedAt}</time><name>Auto</name><desc>Auto parcheggiata</desc><sym>Parking Area</sym><type>Auto</type></wpt>`);
   }
   for (const f of finds.filter((x) => !x.deleted)) {
-    const when = new Date(f.datetime);
+    const vs = [...(f.visits || [])].sort((a, b) => (b.datetime || '').localeCompare(a.datetime || ''));
+    const pos = vs.filter((v) => v.count > 0);
+    const last = vs[0];
+    const when = new Date(last?.datetime || f.createdAt);
     const desc = [
-      `Trovata il ${when.toLocaleString('it-IT')}`,
-      f.species ? `Specie: ${f.species}` : '',
-      f.quantity ? `Quantità: ${f.quantity}` : '',
-      f.temperature != null ? `Temperatura: ${f.temperature} °C` : '',
+      pos.length ? `${pos.length} ritrovamenti, ${pos.reduce((a, v) => a + v.count, 0)} esemplari` : 'Uscita a vuoto',
       f.elevation != null ? `Quota ${Math.round(f.elevation)} m, esposizione ${f.aspectLabel || '-'}` : '',
       f.forest ? `Bosco: ${f.forest}` : '',
-      f.notes || '',
+      ...vs.map((v) => `${new Date(v.datetime).toLocaleDateString('it-IT')}: ${v.count > 0 ? `${v.count} esemplari${v.weightKg ? ` (${v.weightKg} kg)` : ''}${v.age ? `, ${{ nuovo: 'appena nati', maturo: 'maturi', vecchio: 'vecchi' }[v.age]}` : ''}${v.state ? `, ${{ sano: 'sani', bacato: 'bacati', rotto: 'rotti' }[v.state]}` : ''}` : 'niente'}${v.notes ? ` – ${v.notes}` : ''}`),
     ].filter(Boolean).join('\n');
-    parts.push(`<wpt lat="${n6(f.lat)}" lon="${n6(f.lon)}">${f.elevation != null ? `<ele>${Math.round(f.elevation)}</ele>` : ''}<time>${when.toISOString()}</time><name>${esc(`Fungaia ${when.toLocaleDateString('it-IT')}`)}</name><desc>${esc(desc)}</desc><sym>Pin, Red</sym><type>Fungaia</type></wpt>`);
+    const name = pos.length ? `Fungaia (${pos.length}×) ${when.toLocaleDateString('it-IT')}` : `Vuoto ${when.toLocaleDateString('it-IT')}`;
+    parts.push(`<wpt lat="${n6(f.lat)}" lon="${n6(f.lon)}">${f.elevation != null ? `<ele>${Math.round(f.elevation)}</ele>` : ''}<time>${when.toISOString()}</time><name>${esc(name)}</name><desc>${esc(desc)}</desc><sym>${pos.length ? 'Pin, Red' : 'Pin, Blue'}</sym><type>${pos.length ? 'Fungaia' : 'Uscita a vuoto'}</type></wpt>`);
   }
 
   if (analysis) {

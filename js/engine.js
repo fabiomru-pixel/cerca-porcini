@@ -143,7 +143,9 @@ export function evalPlace(cell, ctx, groupKey) {
 
   // Pendenza ed esposizione secondo la situazione (A secco/caldo, B umido/fresco, C intermedia)
   const slopeS = slopeFactor(cell.slope, cell.regime || 'C');
-  const expoPref = 1 + expoBonus(cell.aspect, cell.regime || 'C') * expoFactor;
+  // + quanto hai imparato sul campo: tasso di successo per versante nella stessa situazione
+  const learnedExpo = ctx.learn?.expo?.[cell.regime || 'C']?.[Math.round(cell.aspect / 45) % 8] || 0;
+  const expoPref = 1 + (expoBonus(cell.aspect, cell.regime || 'C') + learnedExpo) * expoFactor;
 
   // la quota nasce dal calcolo termico: la fascia tipica del bosco è solo un indizio (peso ridotto).
   // Pendenza ed esposizione sono riportate a 0–1 dividendo per il loro massimo nella situazione:
@@ -219,7 +221,7 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
     sc *= Math.pow(0.4, killers.length);
     if (sc > best.score) best = { score: sc, daysSince, killers, total: e.total };
   }
-  const soil = soilState(days, idx, rainTotal, s);
+  const soil = soilState(days, idx, rainTotal, s, learn);
   return {
     timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
     daysSince: best.daysSince, killers: best.killers, soil,
@@ -268,10 +270,11 @@ export function soilMoisture(days, idx) {
   return w / cap;
 }
 
-export function soilState(days, idx, rainTotal, s) {
+export function soilState(days, idx, rainTotal, s, learn) {
   const theta = soilMoisture(days, idx);
   let cls = theta >= 0.5 ? 'umido' : theta >= 0.3 ? 'limite' : 'secco';
-  let factor = moistureFactor(theta);
+  // soilShift < 0: nelle tue zone trovi anche con suolo più asciutto -> curva meno severa
+  let factor = moistureFactor(theta - (learn?.soilShift || 0));
   // la regola dei 30 mm in 20 giorni resta valida: sotto soglia il suolo conta come secco
   if (rainTotal < s.rainMinMm) { cls = 'secco'; factor = Math.min(factor, moistureFactor(0.25)); }
   return { theta, cls, factor, ...SOIL_CLASSES[cls] };

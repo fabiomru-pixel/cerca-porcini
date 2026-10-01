@@ -35,6 +35,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body {
   background: var(--bg); color: var(--text);
@@ -78,6 +79,11 @@ svg.i { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-widt
 .spot-pin span { transform: rotate(45deg); }
 .find-pin { width: 30px; height: 30px; border-radius: 50%; background: #7a3e12; border: 2px solid #fff; display: grid; place-items: center; box-shadow: 0 3px 8px rgba(0,0,0,.35); }
 .find-pin svg { width: 18px; height: 18px; }
+.find-pin { position: relative; }
+.find-pin.empty { background: #78716c; opacity: .85; }
+.find-pin .n { position: absolute; top: -6px; right: -6px; background: #15803d; color: #fff; font-size: 10px; font-weight: 800; border-radius: 999px; min-width: 16px; height: 16px; display: grid; place-items: center; padding: 0 4px; border: 1.5px solid #fff; }
+.card.empty-place { opacity: .75; }
+.card.visit { background: var(--surface); }
 .car-pin { width: 34px; height: 34px; border-radius: 10px; background: #2563eb; border: 2px solid #fff; display: grid; place-items: center; color: #fff; box-shadow: 0 3px 8px rgba(0,0,0,.35); }
 .car-pin svg { width: 20px; height: 20px; }
 #carBtn.on { background: #2563eb; color: #fff; }

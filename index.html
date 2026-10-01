@@ -183,6 +183,8 @@
     <form method="dialog" id="findForm">
       <div class="dlg-head"><h2 id="findDlgTitle">Nuova fungaia</h2><button class="icon-btn" value="cancel" formnovalidate aria-label="Chiudi" id="findClose"></button></div>
       <div class="dlg-body">
+        <div id="placeInfo" class="card small" hidden></div>
+        <div id="posGroup">
         <div class="card small" id="findPos">Rilevo la posizione…</div>
         <details class="adv" id="coordsBox">
           <summary>Inserisci le coordinate a mano (fungaie trovate in passato)</summary>
@@ -195,23 +197,8 @@
             <span class="small muted">Formati accettati: <code>43.77123, 11.25561</code> · <code>43,77123 11,25561</code> · <code>43°46'16"N 11°15'20"E</code>. Puoi incollarle da Google Maps o Mapy.com. Ricordati di impostare anche data e ora del ritrovamento.</span>
           </div>
         </details>
-        <div class="grid2">
-          <div class="field"><label for="fDatetime">Data e ora</label><input type="datetime-local" id="fDatetime" required></div>
-          <div class="field"><label for="fTemp">Temperatura (°C)</label><input type="number" id="fTemp" step="0.1" placeholder="auto"></div>
         </div>
-        <div class="grid2">
-          <div class="field"><label for="fSpecies">Specie</label>
-            <select id="fSpecies">
-              <option value="">Non so / altro</option>
-              <option value="aestivalis">Porcino estivo (aestivalis)</option>
-              <option value="aereus">Porcino nero (aereus)</option>
-              <option value="edulis">Porcino autunnale (edulis)</option>
-              <option value="pinophilus">Porcino rosso (pinophilus)</option>
-            </select>
-          </div>
-          <div class="field"><label for="fQty">Quantità</label><input type="text" id="fQty" placeholder="es. 5 esemplari / 1,2 kg"></div>
-        </div>
-        <div class="field"><label for="fForest">Bosco</label>
+        <div class="field" id="forestGroup"><label for="fForest">Bosco</label>
           <select id="fForest">
             <option value="">Non specificato</option>
             <option value="quercia">Querce / Castagni</option>
@@ -219,12 +206,50 @@
             <option value="misto">Misto</option>
           </select>
         </div>
-        <div class="field"><label for="fNotes">Note</label><textarea id="fNotes" placeholder="Accesso, margine del bosco, radura, versante…"></textarea></div>
-        <div class="field">
-          <span class="label">Foto</span>
-          <div class="gallery" id="fGallery"></div>
-          <input type="file" id="fPhotos" accept="image/*" multiple hidden>
-          <input type="file" id="fCamera" accept="image/*" capture="environment" hidden>
+        <div id="visitGroup">
+          <div class="seg" id="outcomeSeg" style="margin-bottom:14px">
+            <button type="button" data-v="found" aria-pressed="true">Funghi trovati</button>
+            <button type="button" data-v="empty" aria-pressed="false">Uscita a vuoto</button>
+          </div>
+          <div class="grid2">
+            <div class="field"><label for="fDatetime">Data e ora</label><input type="datetime-local" id="fDatetime" required></div>
+            <div class="field"><label for="fTemp">Temperatura (°C)</label><input type="number" id="fTemp" step="0.1" placeholder="auto"></div>
+          </div>
+          <div id="foundFields">
+            <div class="grid2">
+              <div class="field"><label for="fCount">Esemplari</label><input type="number" id="fCount" min="1" step="1" inputmode="numeric" value="1"></div>
+              <div class="field"><label for="fWeight">Peso (kg) <span class="muted">a casa</span></label><input type="number" id="fWeight" min="0" step="0.01" inputmode="decimal" placeholder="facoltativo"></div>
+            </div>
+            <div class="field"><label for="fSpecies">Specie</label>
+              <select id="fSpecies">
+                <option value="">Non so / altro</option>
+                <option value="aestivalis">Porcino estivo (aestivalis)</option>
+                <option value="aereus">Porcino nero (aereus)</option>
+                <option value="edulis">Porcino autunnale (edulis)</option>
+                <option value="pinophilus">Porcino rosso (pinophilus)</option>
+              </select>
+            </div>
+            <div class="field">
+              <span class="label">Età del fungo</span>
+              <div class="seg" id="ageSeg">
+                <button type="button" data-v="nuovo">Appena nato</button><button type="button" data-v="maturo">Maturo</button><button type="button" data-v="vecchio">Vecchio</button>
+              </div>
+            </div>
+            <div class="field">
+              <span class="label">Stato del fungo</span>
+              <div class="seg" id="stateSeg">
+                <button type="button" data-v="sano">Sano</button><button type="button" data-v="bacato">Mangiato/bacato</button><button type="button" data-v="rotto">Rotto (caldo/vento)</button>
+              </div>
+              <span class="small muted">Età e stato servono a capire se eri in anticipo, puntuale o in ritardo: è così che l'app impara il timer.</span>
+            </div>
+          </div>
+          <div class="field"><label for="fNotes">Note</label><textarea id="fNotes" placeholder="Accesso, margine del bosco, radura, versante…"></textarea></div>
+          <div class="field">
+            <span class="label">Foto</span>
+            <div class="gallery" id="fGallery"></div>
+            <input type="file" id="fPhotos" accept="image/*" multiple hidden>
+            <input type="file" id="fCamera" accept="image/*" capture="environment" hidden>
+          </div>
         </div>
       </div>
       <div class="dlg-foot">
@@ -239,9 +264,8 @@
     <div class="dlg-head"><h2 id="viewTitle"></h2><button class="icon-btn" id="viewClose" aria-label="Chiudi"></button></div>
     <div class="dlg-body" id="viewBody"></div>
     <div class="dlg-foot">
-      <button class="btn danger" id="viewDelete">Elimina</button>
-      <button class="btn" id="viewMap">Sulla mappa</button>
-      <button class="btn primary" id="viewEdit">Modifica</button>
+      <button class="btn" id="viewEmpty">Uscita a vuoto</button>
+      <button class="btn primary" id="viewAdd">+ Ritrovamento qui</button>
     </div>
   </dialog>
 

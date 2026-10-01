@@ -3,7 +3,10 @@ import { kv, finds as fdb, photos as pdb } from './db.js';
 import { icon } from './icons.js';
 import { runAnalysis } from './analysis.js';
 import { buildGpx, shareOrDownload, download } from './gpx.js';
-import { saveFind, deleteFind, listFinds, processPending, computeLearn } from './finds.js';
+import {
+  createPlace, addVisit, updateVisit, updatePlace, deleteFind, listFinds, processPending, computeLearn,
+  normalizeFind, placeSummary, visitOffset, predictPlace, migrateFinds, AGES, STATES,
+} from './finds.js';
 import { syncDrive } from './drive.js';
 import { lon2px, lat2px, distKm, bearing, fmtDist, parseCoords, ASPECT_NAME } from './geo.js';
 import { addDays } from './engine.js';
@@ -170,9 +173,10 @@ function drawFinds() {
   layers.finds.clearLayers();
   for (const f of state.finds) {
     if (f.lat == null) continue;
+    const s = placeSummary(f);
     L.marker([f.lat, f.lon], {
-      icon: L.divIcon({ className: '', html: `<div class="find-pin">${icon('mushroom').replace('class="i"', 'class="i" style="color:#fff"')}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] }),
-    }).on('click', () => openView(f.id)).addTo(layers.finds);
+      icon: L.divIcon({ className: '', html: `<div class="find-pin${s.emptyOnly ? ' empty' : ''}">${icon('mushroom').replace('class="i"', 'class="i" style="color:#fff"')}${s.nPos > 1 ? `<span class="n">${s.nPos}</span>` : ''}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] }),
+    }).bindTooltip(s.emptyOnly ? 'Uscita a vuoto' : `${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari`).on('click', () => openView(f.id)).addTo(layers.finds);
   }
 }
 
@@ -218,10 +222,11 @@ async function run() {
   if (!navigator.onLine) { toast('Serve la connessione per calcolare. Offline vedi l’ultima analisi salvata.'); return; }
   const btn = $('#runBtn'); btn.disabled = true;
   try {
-    const all = await fdb.all();
+    // solo le fungaie con almeno un ritrovamento danno il bonus "vicino a una tua fungaia"
+    const productive = state.finds.filter((f) => placeSummary(f).nPos > 0);
     const a = await runAnalysis({
       lat: state.start.lat, lon: state.start.lon, date: $('#date').value,
-      settings: state.settings, learn: state.learn, finds: all.filter((f) => !f.deleted),
+      settings: state.settings, learn: state.learn, finds: productive,
       onStep: (t, p) => progress(t, p),
     });
     state.analysis = a;
@@ -422,7 +427,10 @@ async function saveOfflineArea() {
 }
 
 // ---------------------------------------------------------------- fungaie
-let editing = null;      // fungaia in modifica
+// Una fungaia è un luogo con più ritrovamenti nel tempo (anche uscite a vuoto).
+// form.mode: 'new' (nuova fungaia + primo ritrovamento), 'visit' (nuovo ritrovamento in una fungaia),
+//            'editVisit' (modifica ritrovamento), 'editPlace' (modifica posizione/bosco della fungaia)
+let form = { mode: 'new', place: null, visit: null };
 let newPhotos = [];      // File da aggiungere
 let removedPhotos = [];  // id foto da rimuovere
 let watchId = null;
@@ -430,31 +438,65 @@ let findPos = null;
 
 function stopWatch() { if (watchId != null) navigator.geolocation.clearWatch(watchId); watchId = null; }
 
-async function openFindForm(id) {
-  editing = id ? await fdb.get(id) : null;
+function setSeg(id, v) { $$(`#${id} button`).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v))); }
+function getSeg(id) { return $(`#${id} button[aria-pressed="true"]`)?.dataset.v || null; }
+function bindSeg(id, toggle, onChange) {
+  $$(`#${id} button`).forEach((b) => b.onclick = () => {
+    const was = b.getAttribute('aria-pressed') === 'true';
+    setSeg(id, toggle && was ? null : b.dataset.v);
+    onChange?.(getSeg(id));
+  });
+}
+function setOutcome(v) {
+  setSeg('outcomeSeg', v);
+  $('#foundFields').hidden = v === 'empty';
+}
+
+async function openFindForm(mode = 'new', placeId = null, visitId = null, { empty = false } = {}) {
+  const place = placeId ? normalizeFind(await fdb.get(placeId)) : null;
+  const visit = place && visitId ? place.visits.find((v) => v.id === visitId) : null;
+  form = { mode, place, visit };
   newPhotos = []; removedPhotos = []; findPos = null;
-  $('#findDlgTitle').textContent = editing ? 'Modifica fungaia' : 'Nuova fungaia';
-  $('#fDatetime').value = localDT(editing ? new Date(editing.datetime) : new Date());
-  $('#fTemp').value = editing?.temperature ?? '';
-  $('#fSpecies').value = editing?.species || '';
-  $('#fQty').value = editing?.quantity || '';
-  $('#fForest').value = editing?.forestKey || editing?.forestChoice || '';
-  $('#fNotes').value = editing?.notes || '';
+  const showPos = mode === 'new' || mode === 'editPlace';
+  const showVisit = mode !== 'editPlace';
+  $('#posGroup').hidden = !showPos;
+  $('#forestGroup').hidden = !showPos;
+  $('#visitGroup').hidden = !showVisit;
+  $('#placeInfo').hidden = showPos;
+  $('#findDlgTitle').textContent = { new: 'Nuova fungaia', visit: 'Nuovo ritrovamento', editVisit: 'Modifica ritrovamento', editPlace: 'Modifica fungaia' }[mode];
+  $('#findSave').textContent = mode === 'editPlace' ? 'Salva fungaia' : 'Salva';
+  $('#fForest').value = place?.forestChoice || place?.forestKey || '';
+  if (!showPos && place) {
+    const s = placeSummary(place);
+    $('#placeInfo').innerHTML = `${icon('pin')} <b>Fungaia</b> · ${place.elevation != null ? place.elevation + ' m · ' + (place.aspectLabel || '') + ' · ' : ''}${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'}`;
+  }
+  // campi del ritrovamento
+  const v = visit || {};
+  $('#fDatetime').value = localDT(v.datetime ? new Date(v.datetime) : new Date());
+  $('#fTemp').value = v.tempSource === 'manual' ? v.temperature ?? '' : '';
+  $('#fTemp').placeholder = v.temperature != null && v.tempSource !== 'manual' ? `${fmt1(v.temperature)} (meteo)` : 'auto';
+  $('#fCount').value = v.count > 0 ? v.count : 1;
+  $('#fWeight').value = v.weightKg ?? '';
+  $('#fSpecies').value = v.species || '';
+  setSeg('ageSeg', v.age || null);
+  setSeg('stateSeg', v.state || null);
+  $('#fNotes').value = v.notes || '';
+  setOutcome(visit ? (visit.count > 0 ? 'found' : 'empty') : empty ? 'empty' : 'found');
   $('#fCoords').value = '';
   $('#coordsBox').open = false;
-  if (editing) {
-    findPos = { lat: editing.lat, lon: editing.lon, acc: editing.accuracy, alt: editing.gpsAlt };
-    renderFindPos();
-  } else {
-    $('#findPos').innerHTML = 'Rilevo la posizione GPS…';
-    if (navigator.geolocation) {
-      watchId = navigator.geolocation.watchPosition((p) => {
-        if (!findPos || p.coords.accuracy <= findPos.acc || findPos.fromMap) {
-          findPos = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, alt: p.coords.altitude };
-          renderFindPos();
-        }
-      }, () => { if (!findPos) $('#findPos').innerHTML = 'GPS non disponibile. <button type="button" class="btn" id="useMapCenter">Usa il centro della mappa</button>'; bindMapCenter(); },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+  if (showPos) {
+    if (place) { findPos = { lat: place.lat, lon: place.lon, acc: place.accuracy, alt: place.gpsAlt }; renderFindPos(); }
+    else {
+      $('#findPos').innerHTML = 'Rilevo la posizione GPS…';
+      if (navigator.geolocation) {
+        watchId = navigator.geolocation.watchPosition((p) => {
+          if (!findPos || p.coords.accuracy <= findPos.acc) {
+            findPos = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, alt: p.coords.altitude };
+            renderFindPos();
+          }
+        }, () => { if (!findPos) $('#findPos').innerHTML = 'GPS non disponibile. <button type="button" class="btn" id="useMapCenter">Usa il centro della mappa</button>'; bindMapCenter(); },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+      }
     }
   }
   await renderGallery();
@@ -476,7 +518,7 @@ function renderFindPos() {
 async function renderGallery() {
   const g = $('#fGallery');
   const items = [];
-  for (const ph of editing?.photos || []) {
+  for (const ph of form.visit?.photos || []) {
     if (removedPhotos.includes(ph.id)) continue;
     const rec = await pdb.get(ph.id);
     if (rec) items.push(`<div class="ph"><img src="${URL.createObjectURL(rec.thumb || rec.blob)}" alt=""><button type="button" data-rm="${ph.id}" aria-label="Rimuovi">×</button></div>`);
@@ -490,115 +532,183 @@ async function renderGallery() {
   $$('[data-rmnew]', g).forEach((b) => b.onclick = () => { newPhotos.splice(Number(b.dataset.rmnew), 1); renderGallery(); });
 }
 
-async function submitFind() {
-  if (!findPos) { toast('Posizione non ancora disponibile'); return false; }
-  stopWatch();
+function readVisitForm() {
+  const empty = getSeg('outcomeSeg') === 'empty';
   const tempVal = $('#fTemp').value.trim();
   const manualTemp = tempVal !== '' ? Number(tempVal.replace(',', '.')) : null;
-  const forestChoice = $('#fForest').value;
-  const base = editing ? { ...editing } : {};
-  const moved = !editing || Math.abs(editing.lat - findPos.lat) > 1e-6 || Math.abs(editing.lon - findPos.lon) > 1e-6;
-  const dt = new Date($('#fDatetime').value).toISOString();
-  const timeChanged = !editing || editing.datetime !== dt;
+  const count = Math.max(1, Math.round(Number($('#fCount').value) || 1));
+  const w = $('#fWeight').value.trim();
   const data = {
-    ...base,
-    lat: findPos.lat, lon: findPos.lon, accuracy: findPos.acc, gpsAlt: findPos.alt ?? null,
-    datetime: dt,
-    species: $('#fSpecies').value || null,
-    quantity: $('#fQty').value.trim(),
+    datetime: new Date($('#fDatetime').value).toISOString(),
+    count: empty ? 0 : count,
+    weightKg: empty || w === '' ? null : Number(w.replace(',', '.')),
+    species: empty ? null : $('#fSpecies').value || null,
+    age: empty ? null : getSeg('ageSeg'),
+    state: empty ? null : getSeg('stateSeg'),
+    notes: $('#fNotes').value.trim(),
+  };
+  if (manualTemp != null && !isNaN(manualTemp)) { data.temperature = manualTemp; data.tempSource = 'manual'; }
+  else if (form.visit?.tempSource === 'manual' || !form.visit) { data.tempSource = 'auto'; }
+  return data;
+}
+function readPlaceForm() {
+  const forestChoice = $('#fForest').value;
+  return {
+    lat: findPos.lat, lon: findPos.lon, accuracy: findPos.acc ?? null, gpsAlt: findPos.alt ?? null,
     forestChoice,
     forestKey: forestChoice === 'quercia' || forestChoice === 'faggio' ? forestChoice : null,
     forest: forestChoice ? $('#fForest').selectedOptions[0].textContent : null,
-    notes: $('#fNotes').value.trim(),
-    photos: (base.photos || []).filter((p) => !removedPhotos.includes(p.id)),
   };
-  if (manualTemp != null && !isNaN(manualTemp)) { data.temperature = manualTemp; data.tempSource = 'manual'; }
-  else if (base.tempSource === 'manual') { data.temperature = null; data.tempSource = 'auto'; }
-  data.pending = { ...(base.pending || {}) };
-  if (moved) data.pending.terrain = true;
-  if (moved || timeChanged || data.tempSource !== 'manual') data.pending.temperature = data.tempSource !== 'manual';
-  data.pending.snapshot = true;
-  for (const id of removedPhotos) await pdb.del(id);
-  const f = await saveFind(data, newPhotos);
-  toast(navigator.onLine ? 'Fungaia salvata' : 'Fungaia salvata offline: completo i dati quando torna la rete', 3500);
+}
+
+async function submitFind() {
+  const { mode, place, visit } = form;
+  if ((mode === 'new' || mode === 'editPlace') && !findPos) { toast('Posizione non ancora disponibile'); return false; }
+  stopWatch();
+  let saved;
+  if (mode === 'new') saved = await createPlace(readPlaceForm(), readVisitForm(), newPhotos);
+  else if (mode === 'visit') saved = await addVisit(place.id, readVisitForm(), newPhotos);
+  else if (mode === 'editVisit') saved = await updateVisit(place.id, visit.id, readVisitForm(), newPhotos, removedPhotos);
+  else saved = await updatePlace(place.id, readPlaceForm());
+  const empty = mode !== 'editPlace' && getSeg('outcomeSeg') === 'empty';
+  toast(`${empty ? 'Uscita a vuoto registrata' : mode === 'editPlace' ? 'Fungaia aggiornata' : 'Ritrovamento salvato'}${navigator.onLine ? '' : ' (offline: completo i dati quando torna la rete)'}`, 3500);
   await refreshFinds();
   completePending();
+  if (mode !== 'new') setTimeout(() => openView(saved.id), 50);
   return true;
 }
 
 async function refreshFinds() {
   state.finds = await listFinds();
-  state.learn = computeLearn(await fdb.all());
+  state.learn = computeLearn(state.finds);
   drawFinds(); renderFindList(); renderLearn();
   setBadge('fungaie', state.finds.length);
+}
+
+const fmtDay = (iso) => new Date(iso).toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
+const visitOutcome = (v) => (v.count > 0 ? `<b>${v.count} esemplar${v.count === 1 ? 'e' : 'i'}</b>${v.weightKg ? ` · ${fmt1(v.weightKg)} kg` : ''}` : '<b>Uscita a vuoto</b>');
+
+async function firstPhotoThumb(place) {
+  for (const v of placeSummary(place).visits) {
+    for (const ph of v.photos || []) {
+      const rec = await pdb.get(ph.id);
+      if (rec) return URL.createObjectURL(rec.thumb || rec.blob);
+    }
+  }
+  return null;
 }
 
 async function renderFindList() {
   const el = $('#findList');
   if (!state.finds.length) {
-    el.innerHTML = `<div class="empty">${icon('mushroom')}<div>Nessuna fungaia salvata.<br>Quando trovi porcini premi <b>+ Fungaia</b>: salvo posizione, ora, temperatura e foto.</div></div>`;
+    el.innerHTML = `<div class="empty">${icon('mushroom')}<div>Nessuna fungaia salvata.<br>Quando trovi porcini premi <b>+ Fungaia</b>: salvo posizione, ora, quantità, età e stato dei funghi e le foto.</div></div>`;
     return;
   }
   const cards = [];
   for (const f of state.finds) {
-    let thumb = `<div class="thumb">${icon('mushroom')}</div>`;
-    if (f.photos?.length) {
-      const rec = await pdb.get(f.photos[0].id);
-      if (rec) thumb = `<img class="thumb" src="${URL.createObjectURL(rec.thumb || rec.blob)}" alt="">`;
-    }
-    const d = new Date(f.datetime);
-    cards.push(`<div class="card click find" data-id="${f.id}">${thumb}<div>
-      <div class="t"><b>${d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' })}</b> · ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</div>
-      <div class="small muted">${f.species ? SPECIES[f.species].common + ' · ' : ''}${f.elevation != null ? f.elevation + ' m · ' + (f.aspectLabel || '') : 'quota in calcolo'}${f.temperature != null ? ' · ' + fmt1(f.temperature) + ' °C' : ''}</div>
-      <div class="small muted">${f.quantity ? esc(f.quantity) + ' · ' : ''}${f.pending ? '<span class="pill warn">dati in attesa di rete</span>' : ''}${f.photos?.some((p) => !p.driveId) && state.settings.driveClientId ? ' <span class="pill">da sincronizzare</span>' : ''}</div>
+    const s = placeSummary(f);
+    const th = await firstPhotoThumb(f);
+    const thumb = th ? `<img class="thumb" src="${th}" alt="">` : `<div class="thumb">${icon('mushroom')}</div>`;
+    const pending = f.pending || f.visits.some((v) => v.pending);
+    const unsynced = f.visits.some((v) => (v.photos || []).some((p) => !p.driveId)) && state.settings.driveClientId;
+    cards.push(`<div class="card click find${s.emptyOnly ? ' empty-place' : ''}" data-id="${f.id}">${thumb}<div>
+      <div class="t"><b>${s.emptyOnly ? 'Uscita a vuoto' : `${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.weight ? ` · ${fmt1(s.weight)} kg` : ''}`}</b></div>
+      <div class="small muted">Ultimo: ${s.last ? fmtDay(s.last.datetime) : '–'}${s.last?.species ? ' · ' + SPECIES[s.last.species].common : ''}${s.nNeg && !s.emptyOnly ? ` · ${s.nNeg} a vuoto` : ''}</div>
+      <div class="small muted">${f.elevation != null ? f.elevation + ' m · ' + (f.aspectLabel || '') : 'quota in calcolo'}${pending ? ' <span class="pill warn">dati in attesa di rete</span>' : ''}${unsynced ? ' <span class="pill">da sincronizzare</span>' : ''}</div>
     </div></div>`);
   }
   el.innerHTML = cards.join('');
   $$('.find', el).forEach((c) => c.onclick = () => openView(c.dataset.id));
 }
 
+function visitCard(place, v) {
+  const d = new Date(v.datetime);
+  const sn = v.snapshot;
+  const off = visitOffset(v);
+  const adv = sn?.adverse;
+  const chips = [
+    v.age ? `<span class="pill">${AGES[v.age]}</span>` : '',
+    v.state ? `<span class="pill ${v.state === 'sano' ? 'ok' : 'warn'}">${STATES[v.state]}</span>` : '',
+    v.species ? `<span class="pill">${SPECIES[v.species].common}</span>` : '',
+  ].join(' ');
+  const shiftTxt = off ? (off.days === 0 ? 'giorno ideale' : off.days > 0 ? `ideale ~${off.days} gg dopo` : `ideale ~${-off.days} gg prima`) : '';
+  return `<div class="card small visit" data-v="${v.id}">
+    <div class="row"><div class="grow"><b>${d.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</b> ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</div>
+      <button class="btn small" data-edit="${v.id}" style="padding:4px 10px">Modifica</button></div>
+    <div style="margin:4px 0">${visitOutcome(v)} ${chips}</div>
+    ${sn ? `<div class="muted">T suolo ${fmt1(sn.groundT)} °C · umidità suolo ${sn.soilTheta != null ? Math.round(sn.soilTheta * 100) + '%' : '–'} · pioggia 20 gg ${sn.rainTotal} mm${sn.daysSince != null ? ` · ${sn.daysSince} gg dalla pioggia` : ''}${v.temperature != null ? ` · ${fmt1(v.temperature)} °C quel momento` : ''}</div>` : v.pending ? '<div class="muted">Dati meteo in attesa di rete…</div>' : ''}
+    ${off && sn?.daysSince != null ? `<div class="muted">Lettura: ${esc(off.why)} → <b>${shiftTxt}</b> (= ${sn.daysSince + off.days} gg dopo la pioggia)</div>` : ''}
+    ${adv?.any ? `<div style="color:var(--warn)">Nei 7 giorni prima: ${[adv.heat && `caldo anomalo (${fmt1(adv.maxT)} °C il ${itDate(adv.maxTDate)})`, adv.wind && `vento forte (${adv.maxWind} km/h il ${itDate(adv.maxWindDate)})`].filter(Boolean).join(', ')}</div>` : ''}
+    ${v.notes ? `<div style="white-space:pre-wrap;margin-top:4px">${esc(v.notes)}</div>` : ''}
+  </div>`;
+}
+
 async function openView(id) {
-  const f = await fdb.get(id);
-  if (!f) return;
-  const d = new Date(f.datetime);
-  $('#viewTitle').textContent = `Fungaia del ${d.toLocaleDateString('it-IT')}`;
+  const f = normalizeFind(await fdb.get(id));
+  if (!f || f.deleted) { $('#viewDlg').close(); return; }
+  state.viewId = id;
+  const s = placeSummary(f);
+  $('#viewTitle').textContent = s.emptyOnly ? 'Uscita a vuoto' : `Fungaia · ${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'}`;
   const imgs = [];
-  for (const ph of f.photos || []) {
+  for (const v of s.visits) for (const ph of v.photos || []) {
+    if (imgs.length >= 9) break;
     const rec = await pdb.get(ph.id);
     if (rec) imgs.push(`<img src="${URL.createObjectURL(rec.blob)}" alt="" data-full>`);
   }
-  const sn = f.snapshot;
   $('#viewBody').innerHTML = `
     ${imgs.length ? `<div class="gallery" style="margin-bottom:12px">${imgs.join('')}</div>` : ''}
     <div class="kpis">
       <div class="kpi"><b>${f.elevation ?? '–'}${f.elevation != null ? ' m' : ''}</b><span>quota</span></div>
       <div class="kpi"><b>${f.aspectLabel || '–'}</b><span>esposizione${f.slope != null ? ` · ${f.slope}°` : ''}</span></div>
-      <div class="kpi"><b>${f.temperature != null ? fmt1(f.temperature) + '°' : '–'}</b><span>temperatura${f.tempSource === 'manual' ? ' (tua)' : f.tempSource === 'auto' ? ' (meteo)' : ''}</span></div>
+      <div class="kpi"><b>${s.total}</b><span>esemplari${s.weight ? ` · ${fmt1(s.weight)} kg` : ''}</span></div>
     </div>
-    <div class="card small" style="margin-top:10px">
-      <div><b>${d.toLocaleString('it-IT', { dateStyle: 'full', timeStyle: 'short' })}</b></div>
-      <div>${f.lat.toFixed(5)}, ${f.lon.toFixed(5)}${f.accuracy ? ` (±${Math.round(f.accuracy)} m)` : ''}</div>
-      ${f.species ? `<div>Specie: ${SPECIES[f.species].label} – ${SPECIES[f.species].common}</div>` : ''}
-      ${f.quantity ? `<div>Quantità: ${esc(f.quantity)}</div>` : ''}
-      ${f.forest ? `<div>Bosco: ${esc(f.forest)}</div>` : ''}
-      ${f.notes ? `<div style="margin-top:6px;white-space:pre-wrap">${esc(f.notes)}</div>` : ''}
-    </div>
-    ${sn ? `<div class="card small"><b>Condizioni nei giorni prima</b><br>
-      T media aria ${fmt1(sn.meanT)} °C (stima al suolo ${fmt1(sn.groundT)} °C) · pioggia 20 gg ${sn.rainTotal} mm${sn.daysSince != null ? ` · ${sn.daysSince} giorni dopo la pioggia` : ''}</div>` : ''}
-    ${f.pending ? '<div class="alert warn">Alcuni dati verranno completati appena c’è connessione.</div>' : ''}
-    <div class="small muted">Portami qui con:</div>
-    ${navButtons(f.lat, f.lon)}`;
+    <div class="card small" style="margin-top:10px" id="predBox">${navigator.onLine ? 'Calcolo il momento ideale per tornare…' : 'Previsione disponibile quando torna la rete.'}</div>
+    <h3>Ritrovamenti</h3>
+    ${s.visits.map((v) => visitCard(f, v)).join('')}
+    <div class="small muted" style="margin:8px 0 4px">${f.lat.toFixed(5)}, ${f.lon.toFixed(5)}${f.forest ? ' · bosco: ' + esc(f.forest) : ''} · Portami qui con:</div>
+    ${navButtons(f.lat, f.lon)}
+    <div class="nav-row" style="margin-top:10px">
+      <button class="btn" id="viewMap">${icon('pin')} Mappa</button>
+      <button class="btn" id="viewEditPlace">Modifica luogo</button>
+      <button class="btn danger" id="viewDelete">Elimina</button>
+    </div>`;
   $$('#viewBody [data-full]').forEach((img) => img.onclick = () => {
     const lb = document.createElement('div'); lb.className = 'lightbox'; lb.innerHTML = `<img src="${img.src}" alt="">`;
     lb.onclick = () => lb.remove(); document.body.appendChild(lb);
   });
+  $$('#viewBody [data-edit]').forEach((b) => b.onclick = () => { $('#viewDlg').close(); openFindForm('editVisit', f.id, b.dataset.edit); });
   $('#viewDelete').onclick = async () => {
-    if (!confirm('Eliminare questa fungaia? Verrà rimossa anche da Drive alla prossima sincronizzazione.')) return;
+    if (!confirm('Eliminare tutta la fungaia con i suoi ritrovamenti? Verrà rimossa anche da Drive alla prossima sincronizzazione.')) return;
     await deleteFind(id); $('#viewDlg').close(); await refreshFinds(); toast('Fungaia eliminata');
   };
   $('#viewMap').onclick = () => { $('#viewDlg').close(); map.setView([f.lat, f.lon], 16); if (innerWidth < 900) setSheet('peek'); };
-  $('#viewEdit').onclick = () => { $('#viewDlg').close(); openFindForm(id); };
-  $('#viewDlg').showModal();
+  $('#viewEditPlace').onclick = () => { $('#viewDlg').close(); openFindForm('editPlace', f.id); };
+  $('#viewAdd').onclick = () => { $('#viewDlg').close(); openFindForm('visit', f.id); };
+  $('#viewEmpty').onclick = () => { $('#viewDlg').close(); openFindForm('visit', f.id, null, { empty: true }); };
+  if (!$('#viewDlg').open) $('#viewDlg').showModal();
+  if (navigator.onLine && f.lat != null) renderPrediction(f);
+}
+
+async function renderPrediction(f) {
+  const box = $('#predBox');
+  try {
+    const p = await predictPlace(f, state.settings, state.learn);
+    if (!$('#viewDlg').open || !box.isConnected) return;
+    const today = todayStr();
+    const soil = Math.round(p.soilNow * 100);
+    let head;
+    if (p.next) {
+      const st = p.next.from > today ? (p.next.future ? 'con la pioggia prevista' : 'in arrivo') : 'adesso';
+      head = `<div style="font-size:16px;font-weight:700">Momento ideale: ${itDate(p.next.from)} → ${itDate(p.next.to)}</div>
+        <div>${st === 'adesso' ? '<span class="pill ok">finestra aperta</span> ' : ''}dalla pioggia del ${itDate(p.next.end)} (${p.next.total} mm${p.next.future ? ', prevista' : ''}) + ${p.idealDays} giorni</div>`;
+    } else {
+      head = '<div style="font-size:16px;font-weight:700">Nessuna finestra aperta</div><div>Nessuna pioggia utile recente né prevista nei prossimi 15 giorni: aspetta la prossima pioggia sopra ' + state.settings.rainEventMm + ' mm.</div>';
+    }
+    box.innerHTML = `${head}
+      <div class="muted" style="margin-top:4px">Umidità del suolo oggi: ${soil}% · tempo ideale dopo la pioggia: ${p.idealDays} giorni (${esc(p.source)})</div>`;
+  } catch (e) {
+    box.textContent = 'Previsione non disponibile al momento.';
+  }
 }
 
 let pendingBusy = false;
@@ -607,7 +717,10 @@ async function completePending() {
   pendingBusy = true;
   try {
     const n = await processPending(state.settings);
-    if (n) { await refreshFinds(); toast(`Dati completati per ${n} fungai${n === 1 ? 'a' : 'e'}`); }
+    if (n) {
+      await refreshFinds(); toast(`Dati completati per ${n} fungai${n === 1 ? 'a' : 'e'}`);
+      if ($('#viewDlg').open && state.viewId) openView(state.viewId); // aggiorna la scheda aperta
+    }
   } finally { pendingBusy = false; }
 }
 
@@ -637,13 +750,22 @@ function renderLearn() {
   const l = state.learn;
   const el = $('#learnBox');
   if (!l || !l.n) {
-    el.innerHTML = '<b>Affinamento personale</b><br><span class="muted">Ogni fungaia salvata (con dati meteo completati) sposta leggermente la finestra termica e il timer verso quello che funziona nelle tue zone.</span>';
+    el.innerHTML = '<b>Affinamento personale</b><br><span class="muted">Ogni ritrovamento e ogni uscita a vuoto (con dati meteo completati) adattano finestra termica, timer, umidità del suolo ed esposizione a quello che funziona nelle tue zone.</span>';
     return;
   }
   const sh = (v) => (v > 0 ? '+' : '') + fmt1(v);
-  el.innerHTML = `<b>Affinamento personale</b> · ${l.n} ritrovament${l.n === 1 ? 'o' : 'i'} usati<br>
-    Estivo: finestra termica ${sh(l.caldo.tShift)} °C (${l.caldo.n}) · Autunnale: ${sh(l.fresco.tShift)} °C (${l.fresco.n})<br>
-    Timer querce/castagni ${l.timer.quercia >= 0 ? '+' : ''}${l.timer.quercia} gg (${l.timerN.quercia}) · faggi/abeti ${l.timer.faggio >= 0 ? '+' : ''}${l.timer.faggio} gg (${l.timerN.faggio})`;
+  const gg = (v) => `${v >= 0 ? '+' : ''}${v} gg`;
+  const DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
+  const expoTxt = ['A', 'B', 'C'].filter((R) => l.expoN[R]).map((R) => {
+    const best = l.expo[R].map((v, k) => [v, DIRS[k]]).filter(([v]) => Math.abs(v) >= 0.01).sort((a, b) => b[0] - a[0]);
+    const lab = { A: 'secco/caldo', B: 'umido/fresco', C: 'intermedia' }[R];
+    return best.length ? `${lab} (${l.expoN[R]}): ${best.map(([v, d]) => `${d} ${v > 0 ? '+' : ''}${Math.round(v * 100)}%`).join(', ')}` : '';
+  }).filter(Boolean).join('<br>');
+  const soilTxt = l.soilShift ? (l.soilShift < 0 ? `meno severo di ${Math.round(-l.soilShift * 100)} punti di umidità` : `più severo di ${Math.round(l.soilShift * 100)} punti di umidità`) : 'come da regole';
+  el.innerHTML = `<b>Affinamento personale</b> · ${l.nPos} ritrovament${l.nPos === 1 ? 'o' : 'i'} · ${l.nNeg} uscit${l.nNeg === 1 ? 'a' : 'e'} a vuoto<br>
+    Finestra termica: estivo ${sh(l.caldo.tShift)} °C (${l.caldo.n}) · autunnale ${sh(l.fresco.tShift)} °C (${l.fresco.n})<br>
+    Timer (dalla pioggia al giorno ideale): querce/castagni ${gg(l.timer.quercia)} (${l.timerN.quercia}) · faggi/abeti ${gg(l.timer.faggio)} (${l.timerN.faggio})<br>
+    Suolo: ${soilTxt} (${l.soilN})${expoTxt ? `<br>Esposizione per situazione:<br>${expoTxt}` : ''}`;
 }
 
 // ---------------------------------------------------------------- backup
@@ -890,6 +1012,9 @@ function bindUI() {
   $('#fCoordsApply').onclick = applyCoords;
   $('#fCoords').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); applyCoords(); } };
 
+  bindSeg('outcomeSeg', false, setOutcome);
+  bindSeg('ageSeg', true);
+  bindSeg('stateSeg', true);
   $('#fPhotos').onchange = (e) => { newPhotos.push(...e.target.files); e.target.value = ''; renderGallery(); };
   $('#fCamera').onchange = (e) => { newPhotos.push(...e.target.files); e.target.value = ''; renderGallery(); };
   $('#findForm').onsubmit = async (e) => {
@@ -933,6 +1058,7 @@ async function init() {
   state.analysis = await kv.get('lastAnalysis');
   if (state.analysis) { drawAnalysis(state.analysis, !lastGps); renderResults(); }
   renderSpots();
+  await migrateFinds(); // fungaie della prima versione -> luogo + ritrovamenti
   await refreshFinds();
   locate({ silent: true });
   completePending();
