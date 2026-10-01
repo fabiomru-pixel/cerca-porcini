@@ -1,11 +1,11 @@
 // Service worker: app disponibile offline + cache delle mappe e dell'altimetria
-const SHELL = 'cp-shell-v8';
+const SHELL = 'cp-shell-v9';
 // solo risposte CORS: le risposte "opache" Chrome le conta ~7 MB l'una e satura lo spazio del sito
 const TILES = 'cp-tiles-v2';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/config.js', 'js/db.js', 'js/icons.js', 'js/geo.js', 'js/dem.js', 'js/weather.js',
-  'js/engine.js', 'js/sources.js', 'js/contours.js', 'js/analysis.js', 'js/gpx.js', 'js/finds.js', 'js/drive.js',
+  'js/engine.js', 'js/sources.js', 'js/contours.js', 'js/analysis.js', 'js/gpx.js', 'js/finds.js', 'js/drive.js', 'js/climate.js',
   'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css',
   'vendor/leaflet/images/marker-icon.png', 'vendor/leaflet/images/marker-icon-2x.png', 'vendor/leaflet/images/marker-shadow.png',
   'vendor/leaflet/images/layers.png', 'vendor/leaflet/images/layers-2x.png',

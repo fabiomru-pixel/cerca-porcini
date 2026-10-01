@@ -7,6 +7,7 @@ import { saveFind, deleteFind, listFinds, processPending, computeLearn } from '.
 import { syncDrive } from './drive.js';
 import { lon2px, lat2px, distKm, bearing, fmtDist, parseCoords, ASPECT_NAME } from './geo.js';
 import { addDays } from './engine.js';
+import { REGIMES } from './climate.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -117,6 +118,7 @@ function spotPopup(s) {
     ${s.elevation} m · esposizione ${s.aspectLabel} · pendenza ${s.slope}°<br>
     ${esc(s.forest)}${s.forestType ? ` <span class="muted">(${esc(s.forestType)})</span>` : ''}${s.edge ? ' · margine/radura' : ''}<br>
     <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C · luogo ${s.place} · tempismo ${s.timing}</span><br>
+    ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()} · pioggia 20 gg ${s.rainTotal} mm</span><br>` : ''}
     <span class="muted">${s.species.join(', ')}</span>
     ${prot}${kill}
     <div class="small muted" style="margin-top:8px">Portami qui con:</div>
@@ -221,6 +223,24 @@ async function run() {
   }
 }
 
+// Situazione del bosco (A secco/caldo, B umido/fresco, C intermedia) rispetto al clima normale del periodo
+function situationCard(a) {
+  if (!a.clim) return '';
+  const c = a.clim, t = a.tc, s = a.summary;
+  const counts = { A: 0, B: 0, C: 0 };
+  for (const sp of a.spots) if (sp.regime) counts[sp.regime]++;
+  const main = ['A', 'B', 'C'].sort((x, y) => counts[y] - counts[x])[0];
+  const tLabel = t.high || t.maxAnom ? '<span class="pill bad">sopra la media</span>' : t.low ? '<span class="pill ok">medio-bassa</span>' : '<span class="pill">nella media</span>';
+  return `<h3>Situazione del bosco</h3>
+    <div class="card small">
+      <div style="font-size:16px;font-weight:700;margin-bottom:4px">${REGIMES[main].label}</div>
+      <div>${REGIMES[main].hint}.</div>
+      <div style="margin-top:8px">Temperatura in valle ${fmt1(s.meanT)} °C ${tLabel}<br>
+        <span class="muted">Normale del periodo ${fmt1(c.normal)} °C (${esc(c.source)}, zona ${esc(c.zoneLabel)}) · elevata oltre ${fmt1(c.high)} °C · massime anomale oltre ${fmt1(c.maxAnom)} °C (ora ${fmt1(s.meanMax)} °C)</span></div>
+      <div style="margin-top:6px" class="muted">Spot per situazione (dipende dalla pioggia caduta in ciascuna zona): secco/caldo ${counts.A} · umido/fresco ${counts.B} · intermedia ${counts.C}</div>
+    </div>`;
+}
+
 function renderResults() {
   const a = state.analysis;
   const el = $('#results');
@@ -271,6 +291,7 @@ function renderResults() {
       <div class="muted">Quota di partenza: ${a.valleyElev} m · gradiente ${a.settings.gradient.toFixed(2).replace('.', ',')} °C/100 m</div>
     </div>
     ${alerts.join('')}
+    ${situationCard(a)}
     <h3>Fascia di quota consigliata</h3>
     ${groups}
     <h3>Timer del micelio</h3>
@@ -301,6 +322,7 @@ function renderSpots() {
         <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.nearFind ? '<span class="pill ok">vicino a una tua fungaia</span>' : ''}</div>
         <div class="m">${esc(s.forest)}${s.forestType ? ` (${esc(s.forestType)})` : ''}${s.edge ? ' · margine' : ''} · pendenza ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km</div>
         <div class="m">T suolo ${fmt1(s.tLocal)} °C · luogo ${s.place} · tempismo ${s.timing}${s.daysSince != null ? ` · ${s.daysSince} gg da pioggia` : ''}</div>
+        ${s.regime ? `<div class="m">${REGIMES[s.regime].label} · pioggia 20 gg ${s.rainTotal} mm</div>` : ''}
         ${s.protected ? `<div class="m" style="color:var(--danger)">${s.protected.strict ? 'Riserva integrale' : 'Area protetta'}: ${esc(s.protected.name)}</div>` : ''}
         ${s.killers.length ? `<div class="m" style="color:var(--warn)">Timer fermo: ${s.killers.join(', ')}</div>` : ''}
       </div>

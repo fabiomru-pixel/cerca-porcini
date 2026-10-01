@@ -5,6 +5,7 @@ import { fetchDaily } from './weather.js';
 import { forestRaster, forestPatch, fetchProtected, protectedAt } from './sources.js';
 import { distKm, bboxAround, aspectLabel, metersPerPixel, ASPECT_DEG, angDiff } from './geo.js';
 import { contourLines } from './contours.js';
+import { climateFor, tempClass, regimeOf } from './climate.js';
 import {
   activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey,
 } from './engine.js';
@@ -56,6 +57,11 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const mosaic = await loadMosaic(lat, lon, radius, { maxTiles: 64, onProgress: (p) => onStep('Scarico l’altimetria…', 0.1 + p * 0.25) });
   const valleyElev = Math.max(0, Math.round(mosaic.elevation(lat, lon)));
 
+  // normale del periodo e classe di temperatura (per decidere la situazione A/B/C)
+  onStep('Confronto con il clima normale del periodo…', 0.36);
+  const clim = await climateFor(lat, lon, date, valleyElev, s.gradient);
+  const tc = tempClass(summary, clim);
+
   const groups = activeGroups(date, s.species).map((g) => ({
     ...g,
     band: targetBand(summary.meanT, valleyElev, s.gradient, g.key, learn),
@@ -90,6 +96,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     w.i = grid.pts[k].i; w.j = grid.pts[k].j; byIJ.set(`${w.i},${w.j}`, w);
     // tempismo per tipo di bosco ("lepri" e "diesel"), a una quota rappresentativa
     w.timing = { quercia: evalTiming(w, date, s, 'quercia', 600, learn), faggio: evalTiming(w, date, s, 'faggio', 1250, learn) };
+    w.regime = regimeOf(w.timing.quercia.rainTotal, tc); // pioggia caduta in questa zona
   });
 
   onStep('Applico le regole al territorio…', 0.58);
@@ -137,7 +144,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       }
       let best = null;
       for (const g of groups) {
-        const pl = evalPlace({ elevation, slope, aspect, forestKey: fk }, ctx, g.key);
+        const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime }, ctx, g.key);
         const fin = combine(pl.score, tm.score, g.weight, bonus);
         if (!best || fin > best.fin) best = { fin, pl, tm, g };
       }
@@ -194,10 +201,11 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const code = c.patch ? (c.patch.frac === 0 ? 0 : c.patch.broad >= c.patch.conif ? 1 : 2) : c.code;
       const fk = cellForestKey(c.elevation, code);
       const tm = evalTiming(w, date, s, fk, c.elevation, learn);
+      const regime = regimeOf(tm.rainTotal, tc);
       const edge = c.patch && c.patch.frac > 0.3 && c.patch.frac < 0.85 ? 1.08 : 1;
       let best = null;
       for (const g of groups) {
-        const pl = evalPlace({ elevation: c.elevation, slope: c.slope, aspect: c.aspect, forestKey: fk }, ctx, g.key);
+        const pl = evalPlace({ elevation: c.elevation, slope: c.slope, aspect: c.aspect, forestKey: fk, regime }, ctx, g.key);
         let bonus = edge;
         for (const f of nearFinds) { const d = distKm(c, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
         const fin = combine(pl.score, tm.score, g.weight, bonus);
@@ -209,10 +217,10 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         aspectLabel: aspectLabel(c.aspect, c.slope),
         group: best.g.key,
         species: best.g.species.map((k) => SPECIES[k].common),
-        score: Math.round(Math.min(1, best.fin / 1.12) * 100),
+        score: Math.round(Math.min(1, best.fin / 1.3) * 100),
         fk,
         wIJ: `${w.i},${w.j}`,
-        place: Math.round(Math.min(1, best.pl.score) * 100),
+        place: Math.round(Math.min(1, best.pl.score / 1.3) * 100),
         timing: Math.round(tm.score * 100),
         tLocal: Math.round(best.pl.tLocal * 10) / 10,
         forest: FORESTS[fk].label,
@@ -223,6 +231,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         killers: tm.killers,
         protected: protectedAt(protectedFc, c.lat, c.lon),
         nearFind: nearFinds.some((f) => distKm(c, f) < 1),
+        regime,
       };
     })
     .sort((a, b) => b.score - a.score)
@@ -257,5 +266,6 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto' },
     summary, groups, timers, spots: final, overlay, contours,
     protectedFc, forestChecked: !!forest, demZoom: mosaic.z,
+    clim, tc,
   };
 }

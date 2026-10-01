@@ -140,21 +140,43 @@ export function evalPlace(cell, ctx, groupKey) {
   if (cell.elevation < f.altMin) band = Math.max(0.35, 1 - (f.altMin - cell.elevation) / 400);
   else if (cell.elevation > f.altMax) band = Math.max(0.35, 1 - (cell.elevation - f.altMax) / 400);
 
-  // Pendenza: pianori e falsopiani trattengono l'acqua
-  const slopeS = cell.slope <= 8 ? 1 : cell.slope >= 35 ? 0.2 : 1 - ((cell.slope - 8) / 27) * 0.8;
-
-  // Esposizione "di stagione": col caldo meglio N/NE (umidità), col fresco meglio S/SE
-  const hot = ctx.meanMax >= 28;
-  const cool = ctx.meanT <= 14;
-  let expoPref = 1;
-  if (expoFactor > 0.3) {
-    if (hot) expoPref = 1 + 0.12 * -southness;         // premia Nord
-    else if (cool) expoPref = 1 + 0.12 * southness;    // premia Sud
-  }
+  // Pendenza ed esposizione secondo la situazione (A secco/caldo, B umido/fresco, C intermedia)
+  const slopeS = slopeFactor(cell.slope, cell.regime || 'C');
+  const expoPref = 1 + expoBonus(cell.aspect, cell.regime || 'C') * expoFactor;
 
   // la quota nasce dal calcolo termico: la fascia tipica del bosco è solo un indizio (peso ridotto)
-  const score = clamp(thermal * (0.75 + 0.25 * band) * slopeS * expoPref, 0, 1.2);
-  return { score, tLocal, thermal, band, slopeS, expoC, forestC, forestKey: cell.forestKey || forestByElevation(cell.elevation).key };
+  const score = clamp(thermal * (0.75 + 0.25 * band) * slopeS * expoPref, 0, 1.3);
+  return { score, tLocal, thermal, band, slopeS, expoPref, expoC, forestC, forestKey: cell.forestKey || forestByElevation(cell.elevation).key };
+}
+
+// Interpolazione lineare a tratti su punti [x, y]
+const piecewise = (x, pts) => {
+  if (x <= pts[0][0]) return pts[0][1];
+  for (let i = 1; i < pts.length; i++) {
+    if (x <= pts[i][0]) {
+      const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+      return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
+    }
+  }
+  return pts[pts.length - 1][1];
+};
+
+// A: piano/falsopiano 0–8° al massimo, ripido molto penalizzato
+// B: pendenza media 10–25° al massimo, piano e ripido un po' penalizzati
+// C: come prima, pianori premiati e ripido penalizzato
+export function slopeFactor(slope, regime) {
+  if (regime === 'A') return piecewise(slope, [[8, 1.15], [15, 1.0], [30, 0.6]]);
+  if (regime === 'B') return piecewise(slope, [[5, 0.85], [10, 1.15], [25, 1.15], [35, 0.7]]);
+  return piecewise(slope, [[8, 1], [35, 0.2]]);
+}
+
+// Bonus esposizione: pieno nelle due direzioni ideali, metà in quelle accanto, malus sul lato opposto
+// A: ideale Nord–Nord-Est (centro 22,5°) · B: ideale Sud–Sud-Est (centro 157,5°)
+export function expoBonus(aspect, regime) {
+  if (regime !== 'A' && regime !== 'B') return 0;
+  const target = regime === 'A' ? 22.5 : 157.5;
+  const d = Math.abs((((aspect - target) % 360) + 540) % 360 - 180);
+  return piecewise(d, [[22.5, 0.25], [67.5, 0.125], [112.5, -0.05], [157.5, -0.2]]);
 }
 
 // ---------- Timer dopo la pioggia ----------
