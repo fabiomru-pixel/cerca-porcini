@@ -77,6 +77,8 @@ svg.i { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-widt
   box-shadow: 0 3px 8px rgba(0,0,0,.35); border: 2px solid #fff;
 }
 .spot-pin span { transform: rotate(45deg); }
+.spot-pin.fung { border: 3px solid #7a3e12; box-shadow: 0 0 0 2px #fff, 0 3px 8px rgba(0,0,0,.4); }
+.card.spot.fung { border-left: 4px solid #7a3e12; }
 .find-pin { width: 30px; height: 30px; border-radius: 50%; background: #7a3e12; border: 2px solid #fff; display: grid; place-items: center; box-shadow: 0 3px 8px rgba(0,0,0,.35); }
 .find-pin svg { width: 18px; height: 18px; }
 .find-pin { position: relative; }

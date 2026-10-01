@@ -380,19 +380,24 @@ export function computeLearn(allFinds) {
 }
 
 // ---------------------------------------------------------------- previsione per una fungaia
-// Momento ideale previsto: ultima (o prossima) pioggia utile + giorni ideali di questa fungaia
-export async function predictPlace(place, s, learn) {
+// Giorni ideali dalla pioggia per questa fungaia: dai suoi ritrovamenti, altrimenti dalle regole (affinate)
+export function placeIdealDays(place, learn) {
   place = normalizeFind(place);
   const fk = place.forestKey || forestByElevation(place.elevation ?? 800).key;
   const own = placeSummary(place).visits.filter((v) => isPositive(v) && v.snapshot?.daysSince != null);
-  let idealDays, source;
   if (own.length) {
     let sum = 0, ws = 0;
     for (const v of own) { const w = 1 + Math.log2(1 + v.count) / 2; sum += w * (v.snapshot.daysSince + (visitOffset(v)?.days || 0)); ws += w; }
-    idealDays = Math.round(sum / ws); source = `${own.length} ritrovament${own.length === 1 ? 'o' : 'i'} in questa fungaia`;
-  } else {
-    idealDays = TIMER_CENTER[fk] + (learn?.timer?.[fk] || 0); source = 'regole del bosco (nessun ritrovamento con dati meteo qui)';
+    return { fk, idealDays: Math.round(sum / ws), own: own.length, source: `${own.length} ritrovament${own.length === 1 ? 'o' : 'i'} in questa fungaia` };
   }
+  return { fk, idealDays: TIMER_CENTER[fk] + (learn?.timer?.[fk] || 0), own: 0, source: 'regole del bosco (nessun ritrovamento con dati meteo qui)' };
+}
+export { TIMER_CENTER };
+
+// Momento ideale previsto: ultima (o prossima) pioggia utile + giorni ideali di questa fungaia
+export async function predictPlace(place, s, learn) {
+  place = normalizeFind(place);
+  const { fk, idealDays, source } = placeIdealDays(place, learn);
   const [w] = await fetchDaily([{ lat: place.lat, lon: place.lon }], { pastDays: 45, forecastDays: 16 });
   const today = todayStr();
   const idx = w.days.findIndex((d) => d.date === today);

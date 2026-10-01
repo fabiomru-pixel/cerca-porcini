@@ -6,6 +6,7 @@ import { forestRaster, forestPatch, fetchProtected, protectedAt } from './source
 import { distKm, bboxAround, aspectLabel, metersPerPixel, ASPECT_DEG, angDiff } from './geo.js';
 import { contourLines } from './contours.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
+import { placeIdealDays, placeSummary, TIMER_CENTER } from './finds.js';
 import {
   activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore,
 } from './engine.js';
@@ -262,6 +263,58 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   }
   for (const sp of final) { delete sp.wIJ; }
 
+  // Le tue fungaie nel raggio: sempre valutate nel punto esatto, con il timer imparato da ciascuna
+  onStep('Valuto le tue fungaie…', 0.94);
+  const fungaie = [];
+  for (const place of finds.filter((f) => f.lat != null && distKm(center, f) <= radius)) {
+    try {
+      let { elevation, slope, aspect } = place;
+      if (elevation == null || slope == null || aspect == null) ({ elevation, slope, aspect } = await terrainAtPoint(place.lat, place.lon));
+      let fk = place.forestKey;
+      let patch = null;
+      if (!fk) {
+        try { patch = await forestPatch(place.lat, place.lon); } catch { patch = null; }
+        const code = patch ? (patch.frac === 0 ? 0 : patch.broad >= patch.conif ? 1 : 2) : null;
+        fk = cellForestKey(elevation, code);
+      }
+      // timer personale: i giorni ideali di questa fungaia diventano il centro della finestra
+      const ideal = placeIdealDays({ ...place, forestKey: fk, elevation }, learn);
+      const learnF = { ...learn, timer: { ...(learn?.timer || {}), [fk]: ideal.idealDays - TIMER_CENTER[fk] } };
+      const w = nearestWeather(grid, byIJ, place.lat, place.lon, center);
+      const tm = evalTiming(w, date, s, fk, elevation, learnF);
+      const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
+      let best = null;
+      for (const g of groups) {
+        const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime }, ctx, g.key);
+        const fin = combine(pl.score, tm, g.weight, 1);
+        if (!best || fin > best.fin) best = { fin, pl, g };
+      }
+      const sm = placeSummary(place);
+      fungaie.push({
+        fungaia: true, placeId: place.id,
+        lat: place.lat, lon: place.lon,
+        elevation: Math.round(elevation), slope: Math.round(slope), aspect: Math.round(aspect),
+        aspectLabel: aspectLabel(aspect, slope),
+        group: best.g.key, species: best.g.species.map((k) => SPECIES[k].common),
+        score: Math.round(best.fin * 100),
+        soil: { theta: Math.round(tm.soil.theta * 100), cls: tm.soil.cls, label: tm.soil.label },
+        parts: {
+          luogo: Math.round(best.pl.score * 100), suolo: Math.round(tm.soil.factor * 100),
+          timer: Math.round(tm.timer * 100), stagione: Math.round(best.g.weight * 100), bonus: 0,
+        },
+        fk, place: Math.round(best.pl.score * 100), timing: Math.round(tm.timer * 100),
+        tLocal: Math.round(best.pl.tLocal * 10) / 10,
+        forest: FORESTS[fk].label,
+        forestType: patch ? `${patch.type}, copertura ${Math.round(patch.frac * 100)}%` : place.forest || null,
+        rainTotal: Math.round(tm.rainTotal), daysSince: tm.daysSince, killers: tm.killers,
+        protected: protectedAt(protectedFc, place.lat, place.lon),
+        regime, idealDays: ideal.idealDays, idealSource: ideal.source,
+        nPos: sm.nPos, total: sm.total, lastVisit: sm.lastPositive?.datetime || null,
+      });
+    } catch (e) { console.warn('fungaia', place.id, e); }
+  }
+  fungaie.sort((a, b) => b.score - a.score).forEach((f, i) => { f.id = `F${String(i + 1).padStart(2, '0')}`; });
+
   onStep('Disegno le curve della fascia di quota…', 0.96);
   const inRadius = (la, lo) => distKm(center, { lat: la, lon: lo }) <= radius;
   const contours = {};
@@ -278,7 +331,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     createdAt: new Date().toISOString(),
     date, center, radius, valleyElev,
     settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto' },
-    summary, groups, timers, spots: final, overlay, contours,
+    summary, groups, timers, spots: final, fungaie, overlay, contours,
     protectedFc, forestChecked: !!forest, demZoom: mosaic.z,
     clim, tc,
   };

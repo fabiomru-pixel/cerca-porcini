@@ -276,7 +276,10 @@ export function soilState(days, idx, rainTotal, s, learn) {
   // soilShift < 0: nelle tue zone trovi anche con suolo più asciutto -> curva meno severa
   let factor = moistureFactor(theta - (learn?.soilShift || 0));
   // la regola dei 30 mm in 20 giorni resta valida: sotto soglia il suolo conta come secco
-  if (rainTotal < s.rainMinMm) { cls = 'secco'; factor = Math.min(factor, moistureFactor(0.25)); }
+  if (rainTotal < s.rainMinMm) {
+    cls = 'secco'; factor = Math.min(factor, moistureFactor(0.25));
+    return { theta, cls, factor, label: `Suolo secco: meno di ${s.rainMinMm} mm in ${s.rainWindowDays} gg` };
+  }
   return { theta, cls, factor, ...SOIL_CLASSES[cls] };
 }
 

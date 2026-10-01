@@ -82,6 +82,10 @@ function initMap() {
     'Spot consigliati': layers.spots,
     'Le mie fungaie': layers.finds,
   }, { position: 'topright' }).addTo(map);
+  map.on('popupopen', (e) => {
+    const b = e.popup.getElement()?.querySelector('[data-open-place]');
+    if (b) b.onclick = () => { map.closePopup(); openView(b.dataset.openPlace); };
+  });
   map.on('baselayerchange', (e) => { state.baseLayer = Object.keys(TILE_LAYERS).find((k) => TILE_LAYERS[k].name === e.name); });
   state.baseLayer = 'topo';
   map.on('contextmenu', (e) => {
@@ -130,7 +134,9 @@ function spotPopup(s) {
   const prot = s.protected
     ? `<div class="alert ${s.protected.strict ? 'bad' : 'warn'}" style="margin:8px 0 0">${s.protected.strict ? 'Riserva a protezione integrale: raccolta quasi certamente vietata.' : 'Area protetta: verifica il regolamento prima di raccogliere.'}<br><b>${esc(s.protected.name)}</b></div>` : '';
   const kill = s.killers.length ? `<div class="alert warn" style="margin:8px 0 0">Timer fermato da: ${s.killers.join(', ')}</div>` : '';
-  return `<b>${s.id} · ${s.score}/100</b><br>
+  const fung = s.fungaia ? `<div class="small" style="margin:2px 0 4px"><span class="pill ok">La tua fungaia</span> ${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}<br>
+    <span class="muted">Timer di questa fungaia: ideale ${s.idealDays} giorni dopo la pioggia${s.daysSince != null ? ` · oggi ${s.daysSince} gg dalla pioggia` : ''}</span></div>` : '';
+  return `<b>${s.id} · ${s.score}/100</b><br>${fung}
     ${s.elevation} m · esposizione ${s.aspectLabel} · pendenza ${s.slope}°<br>
     ${esc(s.forest)}${s.forestType ? ` <span class="muted">(${esc(s.forestType)})</span>` : ''}${s.edge ? ' · margine/radura' : ''}<br>
     <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C</span><br>
@@ -139,7 +145,8 @@ function spotPopup(s) {
     <span class="muted">${s.species.join(', ')}</span>
     ${prot}${kill}
     <div class="small muted" style="margin-top:8px">Portami qui con:</div>
-    ${navButtons(s.lat, s.lon, { small: true })}`;
+    ${navButtons(s.lat, s.lon, { small: true })}
+    ${s.fungaia ? `<button class="btn small block" style="margin-top:6px" data-open-place="${s.placeId}">Apri la scheda della fungaia</button>` : ''}`;
 }
 
 function drawAnalysis(a, fit = false) {
@@ -161,6 +168,15 @@ function drawAnalysis(a, fit = false) {
   for (const s of a.spots) {
     const m = L.marker([s.lat, s.lon], {
       icon: L.divIcon({ className: '', html: `<div class="spot-pin" style="background:${scoreColor(s.score)}${s.protected ? ';border-color:#dc2626' : ''}"><span>${s.score}</span></div>`, iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -30] }),
+    }).bindPopup(spotPopup(s), { minWidth: 260, maxWidth: 300 });
+    m.spotId = s.id;
+    m.addTo(layers.spots);
+  }
+  // le tue fungaie, sempre valutate nel punto esatto
+  for (const s of a.fungaie || []) {
+    const m = L.marker([s.lat, s.lon], {
+      zIndexOffset: 500,
+      icon: L.divIcon({ className: '', html: `<div class="spot-pin fung" style="background:${scoreColor(s.score)}"><span>${s.score}</span></div>`, iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -30] }),
     }).bindPopup(spotPopup(s), { minWidth: 260, maxWidth: 300 });
     m.spotId = s.id;
     m.addTo(layers.spots);
@@ -299,6 +315,10 @@ function renderResults() {
   };
   const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}<div class="muted">Il timer parte dall’ultima pioggia sopra ${state.settings.rainEventMm} mm; ogni spot usa la pioggia caduta nella sua zona.</div></div>`;
   const alerts = [];
+  if (a.fungaie?.length) {
+    const top = a.fungaie[0];
+    alerts.push(`<div class="alert ok">Le tue fungaie nel raggio: <b>${a.fungaie.length}</b>, valutate nel punto esatto (segnaposto con bordo marrone). La migliore oggi: <b>${top.id} · ${top.score}/100</b> a ${top.elevation} m. Le trovi in cima alla scheda Spot.</div>`);
+  }
   if (a.settings.aspectPref && a.settings.aspectPref !== 'auto') {
     alerts.push(`<div class="alert ok">Solo versanti esposti a <b>${ASPECT_NAME[a.settings.aspectPref]}</b> (tolleranza circa ±35°, esclusi i tratti pianeggianti).${a.spots.length < 5 ? ' Pochi spot: prova “Automatica” o un raggio più ampio.' : ''}</div>`);
   }
@@ -338,29 +358,32 @@ function renderResults() {
     <p class="small muted">Analisi del ${new Date(a.createdAt).toLocaleString('it-IT')}${age >= 6 ? ' · <b>ricalcola per dati aggiornati</b>' : ''}</p>`;
   $('#gpxBtn').onclick = exportGpx;
   $('#offlineBtn').onclick = saveOfflineArea;
-  setBadge('spot', a.spots.length);
+  setBadge('spot', a.spots.length + (a.fungaie?.length || 0));
 }
 
 function renderSpots() {
   const a = state.analysis, el = $('#spotList');
-  if (!a || !a.spots.length) {
+  const fung = a?.fungaie || [];
+  if (!a || (!a.spots.length && !fung.length)) {
     el.innerHTML = `<div class="empty">${icon('target')}<div>${a ? 'Nessuno spot nel raggio scelto: prova ad allargare il raggio.' : 'Calcola le zone dalla scheda Analisi.'}</div></div>`;
     return;
   }
-  el.innerHTML = a.spots.map((s) => `
-    <div class="card click spot" data-id="${s.id}">
+  const card = (s) => `
+    <div class="card click spot${s.fungaia ? ' fung' : ''}" data-id="${s.id}">
       <div class="score" style="background:${scoreColor(s.score)}">${s.score}</div>
       <div>
-        <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.nearFind ? '<span class="pill ok">vicino a una tua fungaia</span>' : ''}</div>
+        <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.fungaia ? `<span class="pill ok">la tua fungaia · ${s.nPos}×</span>` : s.nearFind ? '<span class="pill ok">vicino a una tua fungaia</span>' : ''}</div>
         <div class="m">${esc(s.forest)}${s.forestType ? ` (${esc(s.forestType)})` : ''}${s.edge ? ' · margine' : ''} · pendenza ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km</div>
         <div class="m">T suolo ${fmt1(s.tLocal)} °C · luogo ${s.place} · tempismo ${s.timing}${s.daysSince != null ? ` · ${s.daysSince} gg da pioggia` : ''}</div>
         ${s.regime ? `<div class="m">${REGIMES[s.regime].label} · pioggia 20 gg ${s.rainTotal} mm${s.soil ? ` · ${esc(s.soil.label.toLowerCase())} (${s.soil.theta}%)` : ''}</div>` : ''}
         ${s.protected ? `<div class="m" style="color:var(--danger)">${s.protected.strict ? 'Riserva integrale' : 'Area protetta'}: ${esc(s.protected.name)}</div>` : ''}
         ${s.killers.length ? `<div class="m" style="color:var(--warn)">Timer fermo: ${s.killers.join(', ')}</div>` : ''}
       </div>
-    </div>`).join('');
+    </div>`;
+  el.innerHTML = (fung.length ? `<h3 style="margin-top:4px">Le tue fungaie nel raggio (${fung.length})</h3>${fung.map(card).join('')}<h3>Spot consigliati (${a.spots.length})</h3>` : '')
+    + a.spots.map(card).join('');
   $$('.spot', el).forEach((c) => c.onclick = () => {
-    const s = a.spots.find((x) => x.id === c.dataset.id);
+    const s = [...fung, ...a.spots].find((x) => x.id === c.dataset.id);
     map.setView([s.lat, s.lon], 15);
     layers.spots.eachLayer((m) => { if (m.spotId === s.id) m.openPopup(); });
     if (innerWidth < 900) setSheet('peek');

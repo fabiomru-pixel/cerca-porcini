@@ -37,7 +37,9 @@ export function buildGpx(analysis, finds = [], { nearKm = 3, car = null } = {}) 
     const pos = vs.filter((v) => v.count > 0);
     const last = vs[0];
     const when = new Date(last?.datetime || f.createdAt);
+    const today = analysis?.fungaie?.find((x) => x.placeId === f.id);
     const desc = [
+      today ? `Voto ${analysis.date}: ${today.score}/100 (luogo ${today.parts.luogo}, suolo ${today.parts.suolo}, timer ${today.parts.timer})` : '',
       pos.length ? `${pos.length} ritrovamenti, ${pos.reduce((a, v) => a + v.count, 0)} esemplari` : 'Uscita a vuoto',
       f.elevation != null ? `Quota ${Math.round(f.elevation)} m, esposizione ${f.aspectLabel || '-'}` : '',
       f.forest ? `Bosco: ${f.forest}` : '',
