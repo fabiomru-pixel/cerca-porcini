@@ -128,6 +128,13 @@ function navButtons(lat, lon, { walk = false, small = false } = {}) {
   return `<div class="nav-row">${links.map(([n, u]) => `<a class="${cls}" target="_blank" rel="noopener" href="${u}">${n}</a>`).join('')}</div>`;
 }
 
+// Da dove arriva la pioggia dei giorni passati
+function rainSrcText(src) {
+  if (!src) return '';
+  if (src.type === 'pluviometri') return `Pioggia misurata: pluviometri SIR (${src.stations.map((x) => `${esc(x.n)} ${fmt1(x.km)} km`).join(', ')})`;
+  return 'Pioggia stimata: media di 3 modelli meteo (nessun pluviometro vicino)';
+}
+
 // Dettaglio del punteggio: cosa lo alza e cosa lo abbassa
 const SOIL_PILL = { umido: 'ok', limite: 'warn', secco: 'bad' };
 function scoreBreakdown(s) {
@@ -155,6 +162,7 @@ function spotPopup(s) {
     ${esc(s.forest)}${s.forestType ? ` <span class="muted">(${esc(s.forestType)})</span>` : ''}${s.edge ? ' · margine/radura' : ''}<br>
     <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C</span><br>
     ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()} · pioggia 20 gg ${s.rainTotal} mm</span><br>` : ''}
+    ${s.rainSrc ? `<span class="muted small">${rainSrcText(s.rainSrc)}</span><br>` : ''}
     ${scoreBreakdown(s)}
     ${prot}${kill}
     <div class="small muted" style="margin-top:8px">Portami qui con:</div>
@@ -337,6 +345,7 @@ function soilLine(a) {
   return `<div style="margin-top:8px"><b>Umidità del suolo</b> (pioggia − evaporazione): in valle ${th}%
     <span class="pill ${th >= 50 ? 'ok' : th >= 30 ? 'warn' : 'bad'}">${th >= 50 ? 'umido' : th >= 30 ? 'al limite' : 'secco'}</span><br>
     <span class="muted">Spot: umido ${sc.umido} · al limite ${sc.limite} · secco ${sc.secco}</span></div>
+    ${(() => { const all = [...a.spots, ...(a.fungaie || [])]; const m = all.filter((x) => x.rainSrc?.type === 'pluviometri').length; return all.some((x) => x.rainSrc) ? `<div style="margin-top:6px" class="muted">Pioggia dei giorni passati: <b>misurata dai pluviometri SIR</b> per ${m} spot su ${all.length}${m < all.length ? ', stimata con la media di 3 modelli meteo per gli altri' : ''}.</div>` : ''; })()}
     <div style="margin-top:8px" class="muted">Voto = Luogo × Suolo<sup>1,2</sup> × Timer<sup>0,8</sup> × Stagione<sup>0,5</sup>, ogni fattore da 0 a 1: 100 solo se sono tutti al massimo.</div>`;
 }
 
@@ -787,7 +796,8 @@ async function renderPrediction(f) {
       head = '<div style="font-size:16px;font-weight:700">Nessuna finestra aperta</div><div>Nessuna pioggia utile recente né prevista nei prossimi 15 giorni: aspetta la prossima pioggia sopra ' + state.settings.rainEventMm + ' mm.</div>';
     }
     box.innerHTML = `${head}
-      <div class="muted" style="margin-top:4px">Umidità del suolo oggi: ${soil}% · tempo ideale dopo la pioggia: ${p.idealDays} giorni (${esc(p.source)})</div>`;
+      <div class="muted" style="margin-top:4px">Umidità del suolo oggi: ${soil}% · tempo ideale dopo la pioggia: ${p.idealDays} giorni (${esc(p.source)})</div>
+      ${p.rainSrc ? `<div class="muted small" style="margin-top:4px">${rainSrcText(p.rainSrc)}</div>` : ''}`;
   } catch (e) {
     box.textContent = 'Previsione non disponibile al momento.';
   }

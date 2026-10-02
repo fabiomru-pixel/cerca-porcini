@@ -7,6 +7,7 @@ import { distKm, bboxAround, aspectLabel, metersPerPixel, ASPECT_DEG, angDiff } 
 import { contourLines } from './contours.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
 import { placeIdealDays, placeSummary, TIMER_CENTER } from './finds.js';
+import { loadGauges, applyGauges } from './gauges.js';
 import {
   activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore,
 } from './engine.js';
@@ -17,7 +18,7 @@ function weatherGrid(lat, lon, radiusKm) {
   // maglia fitta (i temporali sono locali), ma al massimo ~100 punti per restare nei limiti del servizio
   // gratuito: con raggi grandi la maglia si allarga, poi le aree migliori ricevono il loro meteo puntuale
   const base = radiusKm <= 20 ? 5 : radiusKm <= 50 ? 8 : 12;
-  const step = Math.max(base, radiusKm * Math.sqrt(Math.PI / 100));
+  const step = Math.max(base, radiusKm * Math.sqrt(Math.PI / 60)); // ~60 punti al massimo
   const dLat = step / 111.32, dLon = step / (111.32 * Math.cos((lat * Math.PI) / 180));
   const n = Math.ceil(radiusKm / step);
   const pts = [];
@@ -53,13 +54,17 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   if (ahead > 15) throw new Error('La data può essere al massimo 15 giorni avanti (limite delle previsioni).');
   if (ahead < -60) throw new Error('La data non può essere più di 60 giorni fa.');
   // servono ~40 giorni prima della data per il bilancio idrico del suolo
-  const pastDays = Math.min(92, Math.max(45, -ahead + 45));
+  const pastDays = Math.min(92, Math.max(41, -ahead + 41)); // 40 giorni per il bilancio del suolo
 
   onStep('Scarico il meteo della tua zona…', 0.05);
   // solo i giorni che servono: meno dati = meno "peso" sul limite del servizio gratuito
   const fDays = Math.max(1, ahead + 1);
   const onWait = (sec) => onStep(`Il servizio meteo chiede una pausa: riprovo tra ${sec} secondi…`, 0.45);
-  const [ref] = await fetchDaily([center], { pastDays, forecastDays: fDays, onWait });
+  const G = await loadGauges(); // pluviometri SIR (null fuori Toscana o se il file non è aggiornato)
+  // pioggia del punto: misurata dai pluviometri vicini se ci sono, altrimenti media dei modelli
+  const atPoint = (w, la, lo) => applyGauges({ ...w, lat: la, lon: lo, days: w.days.map((d) => ({ ...d, rain: d.rainModel ?? d.rain })) }, G);
+  let [ref] = await fetchDaily([center], { pastDays, forecastDays: fDays, onWait });
+  ref = applyGauges(ref, G);
   const summary = summarize(ref.days, date, s);
 
   onStep('Scarico l’altimetria…', 0.1);
@@ -107,7 +112,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     // pioggia caduta in questa zona (suolo secco = piogge scarse)
     w.regime = regimeOf(w.timing.quercia.soil.cls === 'secco' ? 0 : w.timing.quercia.rainTotal, tc);
   };
-  wx.forEach((w, k) => { w.i = grid.pts[k].i; w.j = grid.pts[k].j; byIJ.set(`${w.i},${w.j}`, w); prepWeather(w); });
+  wx.forEach((w, k) => { w.i = grid.pts[k].i; w.j = grid.pts[k].j; applyGauges(w, G); byIJ.set(`${w.i},${w.j}`, w); prepWeather(w); });
 
   onStep('Applico le regole al territorio…', 0.58);
   await new Promise((r) => setTimeout(r, 30));
@@ -258,8 +263,10 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   // meteo puntuale al centro di ogni area (la maglia larga dei raggi grandi non basta per la pioggia)
   onStep('Scarico il meteo puntuale delle aree migliori…', 0.66);
   try {
-    const aw = await fetchDaily(areas.map((c) => ({ lat: c.lat, lon: c.lon })), { pastDays, forecastDays: fDays, onWait });
-    aw.forEach((w, k) => { prepWeather(w); areas[k].w = w; });
+    // solo con raggi grandi (maglia larga) e per le 40 aree migliori: meno richieste al servizio gratuito
+    const need = radius > 60 ? areas.slice(0, 40) : [];
+    const aw = need.length ? await fetchDaily(need.map((c) => ({ lat: c.lat, lon: c.lon })), { pastDays, forecastDays: fDays, onWait }) : [];
+    aw.forEach((w, k) => { applyGauges(w, G); prepWeather(w); need[k].w = w; });
   } catch (e) { console.warn('meteo aree', e); /* resta la maglia larga */ }
   const allWx = [...wx, ...areas.map((c) => c.w).filter(Boolean)];
 
@@ -315,7 +322,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     // con il terreno di dettaglio l'esposizione può cambiare: tolleranza un po' più larga
     .filter((c) => aspectTarget == null || (c.slope >= 3 && angDiff(c.aspect, aspectTarget) <= 40))
     .map((c) => {
-      const w = c.w || nearestWeather(grid, byIJ, c.lat, c.lon, center);
+      // pioggia misurata nel punto esatto dello spot (pluviometri più vicini a lui)
+      const w = atPoint(c.w || nearestWeather(grid, byIJ, c.lat, c.lon, center), c.lat, c.lon);
       const code = c.patch ? (c.patch.frac === 0 ? 0 : c.patch.broad >= c.patch.conif ? 1 : 2) : c.code;
       const fk = cellForestKey(c.elevation, code);
       const tm = evalTiming(w, date, s, fk, c.elevation, learn);
@@ -349,6 +357,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         },
         fk,
         _w: w,
+        rainSrc: w.rainSrc,
         place: Math.round(luogo * 100),
         timing: Math.round(tm.timer * 100),
         tLocal: Math.round(best.pl.tLocal * 10) / 10,
@@ -429,7 +438,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       // timer personale: i giorni ideali di questa fungaia diventano il centro della finestra
       const ideal = placeIdealDays({ ...place, forestKey: fk, elevation }, learn);
       const learnF = { ...learn, timer: { ...(learn?.timer || {}), [fk]: ideal.idealDays - TIMER_CENTER[fk] } };
-      const w = allWx.reduce((b, x) => (distKm(place, x) < distKm(place, b) ? x : b), allWx[0]);
+      const w0 = allWx.reduce((b, x) => (distKm(place, x) < distKm(place, b) ? x : b), allWx[0]);
+      const w = atPoint(w0, place.lat, place.lon);
       const tm = evalTiming(w, date, s, fk, elevation, learnF);
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
       let best = null;
@@ -458,6 +468,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         rainTotal: Math.round(tm.rainTotal), daysSince: tm.daysSince, killers: tm.killers,
         protected: protectedAt(protectedFc, place.lat, place.lon),
         regime, idealDays: ideal.idealDays, idealSource: ideal.source,
+        rainSrc: w.rainSrc,
         nPos: sm.nPos, total: sm.total, lastVisit: sm.lastPositive?.datetime || null,
       });
     } catch (e) { console.warn('fungaia', place.id, e); }

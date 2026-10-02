@@ -7,6 +7,7 @@ import { aspectLabel } from './geo.js';
 import { SPECIES, GROUPS } from './config.js';
 import { rainEpisodes, forestByElevation, forestTempOffset, soilMoisture, forestTimer, addDays } from './engine.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
+import { loadGauges, applyGauges } from './gauges.js';
 
 export const AGES = { nuovo: 'Appena nato', maturo: 'Maturo', vecchio: 'Vecchio' };
 export const STATES = { sano: 'Ottimo / sano', bacato: 'Mangiato / bacato', rotto: 'Rotto da calore o vento' };
@@ -211,7 +212,7 @@ async function dailyAround(lat, lon, date, before = 45) {
 async function snapshotFor(place, v, s) {
   const date = v.datetime.slice(0, 10);
   if (date > todayStr()) return null;
-  const w = await dailyAround(place.lat, place.lon, date);
+  const w = applyGauges(await dailyAround(place.lat, place.lon, date), await loadGauges()); // pioggia misurata se disponibile
   const idx = w.days.findIndex((d) => d.date === date);
   if (idx <= 0) return null;
   const g = s.gradient;
@@ -398,7 +399,8 @@ export { TIMER_CENTER };
 export async function predictPlace(place, s, learn) {
   place = normalizeFind(place);
   const { fk, idealDays, source } = placeIdealDays(place, learn);
-  const [w] = await fetchDaily([{ lat: place.lat, lon: place.lon }], { pastDays: 45, forecastDays: 16 });
+  const [w0] = await fetchDaily([{ lat: place.lat, lon: place.lon }], { pastDays: 45, forecastDays: 16 });
+  const w = applyGauges(w0, await loadGauges());
   const today = todayStr();
   const idx = w.days.findIndex((d) => d.date === today);
   const eps = rainEpisodes(w.days, idx - 30, w.days.length - 1, s.rainEventMm).map((e) => ({
@@ -406,5 +408,5 @@ export async function predictPlace(place, s, learn) {
   }));
   const windows = eps.map((e) => ({ ...e, from: addDays(e.end, idealDays - 2), to: addDays(e.end, idealDays + 2), ideal: addDays(e.end, idealDays) }));
   const next = windows.find((x) => x.to >= today) || null;
-  return { idealDays, source, fk, windows, next, soilNow: soilMoisture(w.days, idx) };
+  return { idealDays, source, fk, windows, next, soilNow: soilMoisture(w.days, idx), rainSrc: w.rainSrc };
 }
