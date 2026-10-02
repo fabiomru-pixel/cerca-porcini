@@ -156,7 +156,6 @@ function spotPopup(s) {
     <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C</span><br>
     ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()} · pioggia 20 gg ${s.rainTotal} mm</span><br>` : ''}
     ${scoreBreakdown(s)}
-    <span class="muted">${s.species.join(', ')}</span>
     ${prot}${kill}
     <div class="small muted" style="margin-top:8px">Portami qui con:</div>
     ${navButtons(s.lat, s.lon, { small: true })}

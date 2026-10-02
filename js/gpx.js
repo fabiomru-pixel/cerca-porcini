@@ -18,7 +18,6 @@ export function buildGpx(analysis, finds = [], { nearKm = 3, car = null } = {}) 
         `Punteggio ${s.score}/100 (luogo ${s.place}, tempismo ${s.timing})`,
         `Quota ${s.elevation} m, esposizione ${s.aspectLabel}, pendenza ${s.slope}°`,
         `${s.forest}${s.forestType ? ' (' + s.forestType + ')' : ''}${s.edge ? ', margine/radura' : ''}`,
-        `Specie: ${s.species.join(', ')}`,
         `T stimata al suolo ${s.tLocal} °C; pioggia 20 gg ${s.rainTotal} mm` + (s.daysSince != null ? `; ${s.daysSince} gg dalla pioggia` : ''),
         s.soil ? `Suolo: ${s.soil.label} (umidità ${s.soil.theta}%)` : '',
         s.parts ? `Voto: luogo ${s.parts.luogo} · suolo ${s.parts.suolo} · timer ${s.parts.timer} · stagione ${s.parts.stagione}` : '',
