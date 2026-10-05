@@ -1,5 +1,5 @@
 // Service worker: app disponibile offline + cache delle mappe e dell'altimetria
-const SHELL = 'cp-shell-v19';
+const SHELL = 'cp-shell-v20';
 // solo risposte CORS: le risposte "opache" Chrome le conta ~7 MB l'una e satura lo spazio del sito
 const TILES = 'cp-tiles-v2';
 const FILES = [

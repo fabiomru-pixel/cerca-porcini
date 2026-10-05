@@ -10,7 +10,7 @@ import { placeIdealDays, placeSummary, TIMER_CENTER } from './finds.js';
 import { loadGauges, applyGauges } from './gauges.js';
 import { nearestRoad, walkMinutes } from './access.js';
 import {
-  activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore, WIND_NAMES,
+  activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore, WIND_NAMES, staleFactor,
 } from './engine.js';
 
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
@@ -53,9 +53,10 @@ function colorFor(score, groupKey) {
 
 // Combina luogo, tempismo, stagione e bonus personali
 // Combina luogo (con bonus margini/fungaie, max 1), suolo, timer e stagione: vedi finalScore
-const combine = (place, tm, season, bonus) => finalScore(Math.min(1, place * bonus), tm.soil.factor, tm.timer, season);
+// + pioggia troppo vecchia (oltre 20 giorni, peggio se fa caldo): vedi staleFactor
+const combine = (place, tm, season, bonus, hot) => finalScore(Math.min(1, place * bonus), tm.soil.factor, tm.timer, season) * staleFactor(tm.lastRainDays, hot);
 
-export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], onStep = () => {} }) {
+export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], empties = [], onStep = () => {} }) {
   const radius = s.radiusKm;
   const center = { lat, lon };
   const aspectTarget = s.aspectPref && s.aspectPref !== 'auto' ? ASPECT_DEG[s.aspectPref] : null;
@@ -84,6 +85,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   onStep('Confronto con il clima normale del periodo…', 0.36);
   const clim = await climateFor(lat, lon, date, valleyElev, s.gradient);
   const tc = tempClass(summary, clim);
+  const hot = tc.high || tc.maxAnom; // caldo sopra la media del periodo
 
   const groups = activeGroups(date, s.species).map((g) => ({
     ...g,
@@ -131,6 +133,21 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const cands = [];
   const ctx = { meanT: summary.meanT, meanMax: summary.meanMax, valleyElev, gradient: s.gradient, southOffsetM: s.southOffsetM, learn };
   const nearFinds = finds.filter((f) => f.lat && distKm(center, f) < radius + 5);
+  // uscite a vuoto recenti: la zona è stata battuta senza trovare niente. Penalità entro 1,5 km che
+  // svanisce in 3 settimane e si riduce molto se nel frattempo è tornata a piovere
+  const nearEmpties = empties.filter((e) => e.lat && distKm(center, e) < radius + 5);
+  const emptyFactor = (ll, tm) => {
+    let f = 1;
+    for (const e of nearEmpties) {
+      const d = distKm(ll, e);
+      if (d > 1.5) continue;
+      const age = daysBetween(e.date, date);
+      if (age < 0 || age > 21) continue;
+      const rainedAfter = tm?.lastRainDate && tm.lastRainDate > e.date;
+      f *= 1 - 0.45 * Math.exp(-(d * d) / 0.5) * (1 - age / 21) * (rainedAfter ? 0.3 : 1);
+    }
+    return f;
+  };
 
   const edgeAt = (x, y) => {
     // margini e radure: bosco presente ma non uniforme nell'intorno 3x3
@@ -166,10 +183,11 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         const d = distKm(ll, f);
         if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8);
       }
+      bonus *= emptyFactor(ll, tm);
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime, wind: tm.wind }, ctx, g.key);
-        const fin = combine(pl.score, tm, g.weight, bonus);
+        const fin = combine(pl.score, tm, g.weight, bonus, hot);
         if (!best || fin > best.fin) best = { fin, pl, tm, g };
       }
       img.set(colorFor(best.pl.score * best.g.weight, best.g.key), k * 4);
@@ -190,10 +208,11 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     const tm = w.timing[fk];
     let bonus = edgeBonus;
     for (const f of nearFinds) { const d = distKm(ll, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
+    bonus *= emptyFactor(ll, tm);
     let best = null;
     for (const g of groups) {
       const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime, wind: tm.wind }, ctx, g.key);
-      const fin = combine(pl.score, tm, g.weight, bonus);
+      const fin = combine(pl.score, tm, g.weight, bonus, hot);
       if (!best || fin > best.fin) best = { fin, pl, tm, g };
     }
     return { fk, ...best };
@@ -344,7 +363,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         const pl = evalPlace({ elevation: c.elevation, slope: c.slope, aspect: c.aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
         let bonus = edge;
         for (const f of nearFinds) { const d = distKm(c, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
-        const fin = combine(pl.score, tm, g.weight, bonus);
+        bonus *= emptyFactor(c, tm);
+        const fin = combine(pl.score, tm, g.weight, bonus, hot);
         if (!best || fin > best.fin) best = { fin, pl, g, bonus };
       }
       const luogo = Math.min(1, best.pl.score * best.bonus);
@@ -379,6 +399,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         killers: tm.killers,
         protected: protectedAt(protectedFc, c.lat, c.lon),
         nearFind: nearFinds.some((f) => distKm(c, f) < 1),
+        nearEmpty: (() => { const e = nearEmpties.filter((x) => distKm(c, x) <= 1.5 && daysBetween(x.date, date) >= 0 && daysBetween(x.date, date) <= 21).sort((a, b) => distKm(c, a) - distKm(c, b))[0]; return e ? { date: e.date, m: Math.round(distKm(c, e) * 1000) } : null; })(),
+        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate,
         regime,
       };
     })
@@ -486,7 +508,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
-        const fin = combine(pl.score, tm, g.weight, 1);
+        const fin = combine(pl.score, tm, g.weight, emptyFactor(place, tm), hot);
         if (!best || fin > best.fin) best = { fin, pl, g };
       }
       const sm = placeSummary(place);

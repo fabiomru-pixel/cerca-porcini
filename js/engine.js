@@ -225,10 +225,24 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   // vento dall'ultima pioggia utile (o negli ultimi 20 giorni se non ce n'è)
   const lastEp = eps[eps.length - 1];
   const wind = windLoads(days, lastEp ? lastEp.endIdx + 1 : Math.max(0, from), idx);
+  // ultima pioggia utile in assoluto (anche oltre i 20 giorni, fin dove arrivano i dati)
+  const anyEps = rainEpisodes(days, 0, idx - 1, s.rainEventMm);
+  const lastAny = anyEps[anyEps.length - 1];
+  const lastRainDays = lastAny ? idx - lastAny.endIdx : null;
+  const lastRainDate = lastAny ? days[lastAny.endIdx].date : null;
   return {
     timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
-    daysSince: best.daysSince, killers: best.killers, soil, wind,
+    daysSince: best.daysSince, killers: best.killers, soil, wind, lastRainDays, lastRainDate,
   };
+}
+
+// ---------- Pioggia troppo vecchia ----------
+// Oltre 20 giorni dall'ultima pioggia utile il micelio smette di fruttificare: voto fortemente ridotto,
+// ancora di più se fa più caldo della media del periodo (riscontro sul campo, ottobre 2026)
+export const STALE_DAYS = 20;
+export function staleFactor(lastRainDays, hot) {
+  if (lastRainDays != null && lastRainDays <= STALE_DAYS) return 1;
+  return hot ? 0.35 : 0.5;
 }
 
 // ---------- Vento che asciuga il bosco ----------

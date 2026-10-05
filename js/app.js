@@ -177,6 +177,8 @@ function spotPopup(s) {
     <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C</span><br>
     ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()} · pioggia 20 gg ${s.rainTotal} mm</span><br>` : ''}
     ${s.access ? `<span class="small">${accessText(s.access)}</span><br>` : ''}
+    ${s.lastRainDays != null ? `<span class="small" style="${s.lastRainDays > 20 ? 'color:var(--danger)' : ''}">Ultima pioggia utile: ${s.lastRainDays} giorni fa (${itDate(s.lastRainDate)})${s.lastRainDays > 20 ? ' – troppo vecchia, voto ridotto' : ''}</span><br>` : '<span class="small" style="color:var(--danger)">Nessuna pioggia utile negli ultimi 40 giorni</span><br>'}
+    ${s.nearEmpty ? `<span class="small" style="color:var(--warn)">Tua uscita a vuoto a ${s.nearEmpty.m} m il ${itDate(s.nearEmpty.date)}: voto ridotto</span><br>` : ''}
     ${s.wind ? `<span class="muted small">${windText(s.wind)}</span><br>` : ''}
     ${s.rainSrc ? `<span class="muted small">${rainSrcText(s.rainSrc)}</span><br>` : ''}
     ${scoreBreakdown(s)}
@@ -283,6 +285,8 @@ async function run() {
     const a = await runAnalysis({
       lat: state.start.lat, lon: state.start.lon, date: $('#date').value,
       settings: state.settings, learn: state.learn, finds: productive,
+      empties: state.finds.flatMap((f) => (f.visits || []).filter((v) => !(v.count > 0) && v.kind !== 'altro' && v.datetime)
+        .map((v) => ({ lat: f.lat, lon: f.lon, date: v.datetime.slice(0, 10) }))),
       onStep: (t, p) => progress(t, p),
     });
     state.analysis = a;
@@ -414,6 +418,18 @@ function renderResults() {
   };
   const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}<div class="muted">Il timer parte dall’ultima pioggia sopra ${state.settings.rainEventMm} mm; ogni spot usa la pioggia caduta nella sua zona.</div></div>`;
   const alerts = [];
+  {
+    const all = [...a.spots, ...(a.fungaie || [])];
+    const stale = all.filter((x) => x.lastRainDays == null || x.lastRainDays > 20);
+    const vd = a.summary.lastRainDays;
+    if (stale.length) {
+      const hot = a.tc?.high || a.tc?.maxAnom;
+      const last = stale.map((x) => x.lastRainDate).filter(Boolean).sort().pop();
+      alerts.push(`<div class="alert bad"><b>Ultima pioggia caduta oltre 20 giorni fa</b> per ${stale.length} spot su ${all.length}${last ? ` (l'ultima utile il ${itDate(last)})` : ''}${hot ? ', con caldo sopra la media del periodo' : ''}: il micelio ha quasi certamente smesso di fruttificare, punteggi ridotti ${hot ? 'di circa due terzi' : 'della metà'}.</div>`);
+    }
+    const ne = a.spots.filter((x) => x.nearEmpty).length;
+    if (ne) alerts.push(`<div class="alert warn">${ne} spot sono vicini a tue uscite a vuoto recenti: punteggio ridotto (la penalità svanisce in 3 settimane o se torna a piovere).</div>`);
+  }
   if (a.scan?.excludedFar) alerts.push(`<div class="alert ok">Esclusi ${a.scan.excludedFar} spot buoni ma a più di ${a.scan.maxWalk} minuti a piedi dalla strada più vicina (limite modificabile in Opzioni).</div>`);
   if (a.fungaie?.length) {
     const top = a.fungaie[0];
@@ -451,6 +467,7 @@ function renderResults() {
     ${timerCard}
     <div class="legend"><span><i style="background:#16a34a"></i>idoneo autunnale</span><span><i style="background:#ea580c"></i>idoneo estivo</span><span><i style="background:#facc15"></i>marginale</span><span><i style="border:2px solid #dc2626"></i>area protetta</span></div>
     ${learnN ? `<p class="small muted">Regole affinate con ${learnN} ritrovament${learnN === 1 ? 'o' : 'i'} tuoi.</p>` : ''}
+    <p class="small muted">Riscontri di altri cercatori: <a href="https://funghimagazine.it/" target="_blank" rel="noopener">aggiornamenti nascite su Funghimagazine</a>.</p>
     <h3>Esporta</h3>
     <div class="btn-row">
       <button class="btn primary" id="gpxBtn">${icon('download')} GPX per Mapy</button>
