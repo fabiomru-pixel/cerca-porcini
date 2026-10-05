@@ -1,50 +1,68 @@
 // Scarica la pioggia giornaliera degli ultimi 30 giorni dai pluviometri automatici del
 // Servizio Idrologico Regionale della Toscana (SIR) e la salva in data/pluviometri.json.
-// Gira ogni notte con GitHub Actions (.github/workflows/pluviometri.yml); l'app legge il file
-// dallo stesso sito, senza chiamare il SIR dal telefono.
+// Gira con GitHub Actions (.github/workflows/pluviometri.yml) oppure a mano: node scripts/pluviometri.mjs
 // Dati SIR: trasmessi in automatico, non validati (possono contenere errori): l'app usa la mediana
 // delle stazioni vicine e scarta quelle fuori scala.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const UA = { 'User-Agent': 'CercaPorcini/1.0 (uso personale; https://fabiomru-pixel.github.io/cerca-porcini/)' };
+const UA = { 'User-Agent': 'Mozilla/5.0 (compatible; CercaPorcini/1.0; uso personale)' };
 const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data', 'pluviometri.json');
+const DEADLINE = Date.now() + 14 * 60 * 1000; // entro 14 minuti salvo comunque quello che ho
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const t0 = Date.now();
+const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);
 
-async function get(url) {
-  for (let a = 0; a < 3; a++) {
+async function get(url, tries = 2) {
+  let last;
+  for (let a = 0; a < tries; a++) {
     try {
-      const r = await fetch(url, { headers: UA });
+      const r = await fetch(url, { headers: UA, signal: AbortSignal.timeout(15000) });
       if (r.ok) return await r.text();
-    } catch { /* riprova */ }
-    await sleep(2000 * (a + 1));
+      last = new Error(`HTTP ${r.status}`);
+    } catch (e) { last = e; }
+    await sleep(1500);
   }
-  throw new Error(`Impossibile scaricare ${url}`);
+  throw new Error(`${url.slice(0, 90)}: ${last?.message}`);
 }
 
-const list = JSON.parse(await get('https://www.sir.toscana.it/open_layers/ajax_stations.php?bbox=9.5,42.2,12.5,44.6&zoom=12&types=pluvio'));
+log('Scarico l\'elenco delle stazioni…');
+const list = JSON.parse(await get('https://www.sir.toscana.it/open_layers/ajax_stations.php?bbox=9.5,42.2,12.5,44.6&zoom=12&types=pluvio', 3));
 const stations = list.features
   .filter((f) => /Stazione autom/.test(f.description))
   .map((f) => ({ id: f.id, n: f.name, lat: f.lat, lon: f.lon, el: Math.round(Number((f.description.match(/Quota staz\. slm \[m\]<\/b>\s*([\d.]+)/) || [])[1] || 0)) }));
-console.log('Stazioni automatiche:', stations.length);
+log('Stazioni automatiche:', stations.length);
 
 const out = [];
 const allDays = new Set();
-let ok = 0;
-for (const s of stations) {
-  try {
-    const h = await get(`https://www.sir.toscana.it/monitoraggio/dettaglio.php?id=${s.id}&type=pluvio_men`);
-    const r = {};
-    for (const m of h.matchAll(/new Array\("\d+","(\d\d)\/(\d\d)\/(\d{4})","[^"]*","([^"]*)"\)/g)) {
-      const d = `${m[3]}-${m[2]}-${m[1]}`;
-      r[d] = m[4] === '' ? 0 : Number(m[4]);
-      allDays.add(d);
+let fails = 0, done = 0;
+const queue = [...stations];
+async function worker() {
+  while (queue.length && Date.now() < DEADLINE) {
+    const s = queue.shift();
+    try {
+      const h = await get(`https://www.sir.toscana.it/monitoraggio/dettaglio.php?id=${s.id}&type=pluvio_men`);
+      const r = {};
+      for (const m of h.matchAll(/new Array\("\d+","(\d\d)\/(\d\d)\/(\d{4})","[^"]*","([^"]*)"\)/g)) {
+        const d = `${m[3]}-${m[2]}-${m[1]}`;
+        r[d] = m[4] === '' ? 0 : Number(m[4]);
+        allDays.add(d);
+      }
+      if (Object.keys(r).length >= 10) out.push({ ...s, r });
+    } catch (e) {
+      fails++;
+      if (fails <= 3) log('Errore:', e.message);
+      // se le prime richieste falliscono tutte, il sito non è raggiungibile da qui: inutile insistere
+      if (done < 12 && fails >= 8) { log('Il sito SIR non risponde da questo server: interrompo.'); process.exit(1); }
     }
-    if (Object.keys(r).length >= 10) { out.push({ ...s, r }); ok++; }
-  } catch (e) { console.warn(s.id, e.message); }
-  await sleep(120); // con garbo verso il server del SIR
+    done++;
+    if (done % 50 === 0) log(`${done}/${stations.length} stazioni, ${out.length} valide`);
+    await sleep(100);
+  }
 }
+await Promise.all([worker(), worker(), worker(), worker()]);
+if (out.length < 50) { log(`Troppo poche stazioni valide (${out.length}): non sovrascrivo il file.`); process.exit(1); }
 
 // il giorno corrente è parziale: lo escludo
 const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
@@ -57,4 +75,4 @@ const data = {
 };
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, JSON.stringify(data));
-console.log(`Salvato ${OUT}: ${ok} stazioni, ${days.length} giorni (${days[0]} → ${days[days.length - 1]}), ${(fs.statSync(OUT).size / 1024).toFixed(0)} KB`);
+log(`Salvato: ${out.length} stazioni, ${days.length} giorni (${days[0]} → ${days[days.length - 1]}), ${(fs.statSync(OUT).size / 1024).toFixed(0)} KB, ${fails} errori`);

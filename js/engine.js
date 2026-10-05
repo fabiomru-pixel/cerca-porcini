@@ -151,8 +151,10 @@ export function evalPlace(cell, ctx, groupKey) {
   // Pendenza ed esposizione sono riportate a 0–1 dividendo per il loro massimo nella situazione:
   // il "luogo" vale 1 solo se temperatura, fascia, pendenza ed esposizione sono tutte ideali.
   const terrainMax = cell.regime === 'A' || cell.regime === 'B' ? 1.15 * 1.25 : 1;
-  const score = clamp((thermal * (0.75 + 0.25 * band) * slopeS * expoPref) / terrainMax, 0, 1);
-  return { score, tLocal, thermal, band, slopeS, expoPref, expoC, forestC, forestKey: cell.forestKey || forestByElevation(cell.elevation).key };
+  // vento dopo la pioggia: i versanti colpiti si asciugano (tramontana -> esposti a N, ecc.)
+  const windF = windFactor(cell.aspect, cell.slope, cell.wind);
+  const score = clamp(((thermal * (0.75 + 0.25 * band) * slopeS * expoPref) / terrainMax) * windF, 0, 1);
+  return { score, tLocal, thermal, band, slopeS, expoPref, expoC, forestC, windF, forestKey: cell.forestKey || forestByElevation(cell.elevation).key };
 }
 
 // Interpolazione lineare a tratti su punti [x, y]
@@ -214,18 +216,48 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
       if (!d) continue;
       if (d.tmin - dT <= KILLERS.frostC && !killers.includes('gelo')) killers.push('gelo');
       if (d.tmax - dT > KILLERS.heatC && !killers.includes('caldo')) killers.push('caldo');
-      const dir = d.windDir, [a, b] = KILLERS.tramontanaDirs;
-      const fromN = dir >= a || dir <= b;
-      if (fromN && d.wind >= KILLERS.tramontanaKmh && !killers.includes('tramontana')) killers.push('tramontana');
+      // il vento non ferma più il timer di tutta la zona: penalizza i versanti che colpisce (vedi windLoads)
     }
     sc *= Math.pow(0.4, killers.length);
-    if (sc > best.score) best = { score: sc, daysSince, killers, total: e.total };
+    if (sc > best.score) best = { score: sc, daysSince, killers, total: e.total, endIdx: e.endIdx };
   }
   const soil = soilState(days, idx, rainTotal, s, learn);
+  // vento dall'ultima pioggia utile (o negli ultimi 20 giorni se non ce n'è)
+  const lastEp = eps[eps.length - 1];
+  const wind = windLoads(days, lastEp ? lastEp.endIdx + 1 : Math.max(0, from), idx);
   return {
     timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
-    daysSince: best.daysSince, killers: best.killers, soil,
+    daysSince: best.daysSince, killers: best.killers, soil, wind,
   };
+}
+
+// ---------- Vento che asciuga il bosco ----------
+// Dopo la pioggia, i giorni di vento forte asciugano soprattutto i versanti rivolti verso il vento
+// (tramontana da N -> versanti esposti a N). Carico per 8 settori di provenienza.
+export const WIND_NAMES = ['Tramontana', 'Grecale', 'Levante', 'Scirocco', 'Ostro', 'Libeccio', 'Ponente', 'Maestrale'];
+export const WIND_MIN_KMH = 30; // raffica media massima giornaliera a 10 m da cui il vento conta
+export function windLoads(days, fromIdx, toIdx) {
+  const loads = new Array(8).fill(0);
+  const events = [];
+  for (let i = Math.max(0, fromIdx); i < toIdx && i < days.length; i++) {
+    const d = days[i];
+    if (d.wind == null || d.windDir == null || d.wind < WIND_MIN_KMH) continue;
+    const k = Math.round(d.windDir / 45) % 8;
+    const l = Math.min(2, (d.wind - 25) / 10); // 30 km/h = 0,5 · 35 = 1 · 45+ = 2
+    loads[k] += l;
+    events.push({ date: d.date, kmh: Math.round(d.wind), k });
+  }
+  return { loads, events };
+}
+
+// Fattore 0,35–1 per un versante: pieno carico se rivolto verso il vento, metà per i versanti accanto
+export function windFactor(aspect, slope, wind) {
+  if (!wind || !wind.loads.some((x) => x > 0)) return 1;
+  const k = Math.round(aspect / 45) % 8;
+  const L = wind.loads;
+  const load = L[k] + 0.5 * (L[(k + 1) % 8] + L[(k + 7) % 8]);
+  const expo = clamp(slope / 12, 0, 1); // in piano il vento non "sceglie" un versante
+  return 1 - Math.min(0.65, 0.3 * load) * expo;
 }
 
 // ---------- Punteggio finale ----------

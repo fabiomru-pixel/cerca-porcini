@@ -1,6 +1,6 @@
 // Sincronizzazione con Google Drive (cartella "Cerca Porcini", permesso drive.file:
 // l'app vede solo i file che crea lei, non il resto del tuo Drive)
-import { finds as fdb, photos as pdb } from './db.js';
+import { finds as fdb, photos as pdb, kv } from './db.js';
 import { normalizeFind } from './finds.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
@@ -121,10 +121,30 @@ export async function syncDrive(settings, saveSettings, onStep = () => {}) {
     if (touched || f !== raw) await fdb.put(f);
   }
 
+  // analisi fatte con l'app (per confrontarle con quello che hai trovato davvero)
+  onStep('Carico le analisi…');
+  let analyses = 0;
+  try {
+    const hist = (await kv.get('analysisHistory')) || [];
+    const todo = hist.filter((x) => !x.uploaded);
+    if (todo.length) {
+      const dir = await ensureFolder('analisi', root);
+      for (const x of todo) {
+        const t = new Date(x.createdAt);
+        const pad = (n) => String(n).padStart(2, '0');
+        const name = `analisi-${x.date}-ore${pad(t.getHours())}${pad(t.getMinutes())}-${x.radius}km-${x.center.lat.toFixed(3)}_${x.center.lon.toFixed(3)}.json`;
+        const body = new Blob([JSON.stringify({ ...x, uploaded: undefined }, null, 1)], { type: 'application/json' });
+        await uploadFile({ name, parent: dir, blob: body });
+        x.uploaded = true; analyses++;
+      }
+      await kv.set('analysisHistory', hist);
+    }
+  } catch (e) { console.warn('analisi su Drive', e); }
+
   onStep('Salvo l’archivio su Drive…');
   const all = [...map.values()];
   const body = new Blob([JSON.stringify({ app: 'cerca-porcini', savedAt: new Date().toISOString(), finds: all }, null, 1)], { type: 'application/json' });
   await uploadFile({ id: remoteFile?.id, name: 'fungaie.json', parent: root, blob: body });
   await saveSettings({ lastSync: new Date().toISOString() });
-  return { downloaded, uploaded, total: all.filter((f) => !f.deleted).length };
+  return { downloaded, uploaded, analyses, total: all.filter((f) => !f.deleted).length };
 }

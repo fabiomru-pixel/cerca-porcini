@@ -138,6 +138,7 @@
         <div class="field"><label for="rainEventMm">Pioggia che avvia il timer (mm)</label><input type="number" id="rainEventMm" min="3" max="80"></div>
         <div class="field"><label for="southOffsetM">Versante Sud = metri più in basso</label><input type="number" id="southOffsetM" min="0" max="300" step="5"></div>
         <div class="field"><label for="maxSpots">Numero massimo di spot</label><input type="number" id="maxSpots" min="5" max="60"></div>
+        <div class="field"><label for="maxWalkMin">Massimo a piedi dalla strada (minuti)</label><input type="number" id="maxWalkMin" min="10" max="180" step="5"></div>
       </div>
       <div id="learnBox" class="card small"></div>
 
@@ -211,6 +212,7 @@
           <div class="seg" id="outcomeSeg" style="margin-bottom:14px">
             <button type="button" data-v="found" aria-pressed="true">Funghi trovati</button>
             <button type="button" data-v="empty" aria-pressed="false">Uscita a vuoto</button>
+            <button type="button" data-v="other" aria-pressed="false">Altro fungo</button>
           </div>
           <div class="grid2">
             <div class="field"><label for="fDatetime">Data e ora</label><input type="datetime-local" id="fDatetime" required></div>
@@ -221,6 +223,9 @@
               <div class="field"><label for="fCount">Esemplari</label><input type="number" id="fCount" min="1" step="1" inputmode="numeric" value="1"></div>
               <div class="field"><label for="fWeight">Peso (kg) <span class="muted">a casa</span></label><input type="number" id="fWeight" min="0" step="0.01" inputmode="decimal" placeholder="facoltativo"></div>
             </div>
+            <div class="field" id="otherFields"><label for="fOtherName">Quale fungo?</label><input type="text" id="fOtherName" placeholder="es. Mazza di tamburo, Ovolo, Galletto…">
+              <span class="small muted">Gli altri funghi restano nel tuo archivio ma non entrano nei calcoli sui porcini.</span></div>
+            <div id="porcinoFields">
             <div class="field"><label for="fSpecies">Specie</label>
               <select id="fSpecies">
                 <option value="">Non so / altro</option>
@@ -242,6 +247,7 @@
                 <button type="button" data-v="sano">Sano</button><button type="button" data-v="bacato">Mangiato/bacato</button><button type="button" data-v="rotto">Rotto (caldo/vento)</button>
               </div>
               <span class="small muted">Età e stato servono a capire se eri in anticipo, puntuale o in ritardo: è così che l'app impara il timer.</span>
+            </div>
             </div>
           </div>
           <div class="field"><label for="fNotes">Note</label><textarea id="fNotes" placeholder="Accesso, margine del bosco, radura, versante…"></textarea></div>

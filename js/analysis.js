@@ -8,11 +8,20 @@ import { contourLines } from './contours.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
 import { placeIdealDays, placeSummary, TIMER_CENTER } from './finds.js';
 import { loadGauges, applyGauges } from './gauges.js';
+import { nearestRoad, walkMinutes } from './access.js';
 import {
-  activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore,
+  activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore, WIND_NAMES,
 } from './engine.js';
 
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
+
+// riassunto del vento dopo la pioggia per la scheda dello spot
+const windInfo = (windF, wind) => {
+  if (!wind?.events?.length) return null;
+  const byK = {};
+  for (const e of wind.events) { const b = (byK[e.k] ||= { k: e.k, name: WIND_NAMES[e.k], days: 0, max: 0, last: e.date }); b.days++; b.max = Math.max(b.max, e.kmh); b.last = e.date; }
+  return { penalty: Math.round((1 - (windF ?? 1)) * 100), winds: Object.values(byK).sort((x, y) => y.days - x.days) };
+};
 
 function weatherGrid(lat, lon, radiusKm) {
   // maglia fitta (i temporali sono locali), ma al massimo ~100 punti per restare nei limiti del servizio
@@ -159,7 +168,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       }
       let best = null;
       for (const g of groups) {
-        const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime }, ctx, g.key);
+        const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime, wind: tm.wind }, ctx, g.key);
         const fin = combine(pl.score, tm, g.weight, bonus);
         if (!best || fin > best.fin) best = { fin, pl, tm, g };
       }
@@ -183,7 +192,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     for (const f of nearFinds) { const d = distKm(ll, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
     let best = null;
     for (const g of groups) {
-      const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime }, ctx, g.key);
+      const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime, wind: tm.wind }, ctx, g.key);
       const fin = combine(pl.score, tm, g.weight, bonus);
       if (!best || fin > best.fin) best = { fin, pl, tm, g };
     }
@@ -286,7 +295,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   refined.sort((a, b) => b.fin - a.fin);
   const picked = [];
   for (const r of refined) {
-    if (picked.length >= Math.ceil(s.maxSpots * 1.4)) break;
+    if (picked.length >= Math.ceil(s.maxSpots * 2.2)) break; // margine: alcuni verranno esclusi perché lontani dalla strada
     if (picked.every((p) => distKm(p, r) >= 0.4)) picked.push(r);
   }
 
@@ -317,7 +326,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   }
   try { protectedFc = await fetchProtected(pbb); } catch { protectedFc = null; }
 
-  const final = picked
+  const ranked = picked
     .filter((c) => !c.patch || c.patch.frac >= 0.25)
     // con il terreno di dettaglio l'esposizione può cambiare: tolleranza un po' più larga
     .filter((c) => aspectTarget == null || (c.slope >= 3 && angDiff(c.aspect, aspectTarget) <= 40))
@@ -332,7 +341,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const edge = c.patch && c.patch.frac > 0.3 && c.patch.frac < 0.85 ? 1.08 : 1;
       let best = null;
       for (const g of groups) {
-        const pl = evalPlace({ elevation: c.elevation, slope: c.slope, aspect: c.aspect, forestKey: fk, regime }, ctx, g.key);
+        const pl = evalPlace({ elevation: c.elevation, slope: c.slope, aspect: c.aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
         let bonus = edge;
         for (const f of nearFinds) { const d = distKm(c, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
         const fin = combine(pl.score, tm, g.weight, bonus);
@@ -358,6 +367,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         fk,
         _w: w,
         rainSrc: w.rainSrc,
+        wind: windInfo(best.pl.windF, tm.wind),
         place: Math.round(luogo * 100),
         timing: Math.round(tm.timer * 100),
         tLocal: Math.round(best.pl.tLocal * 10) / 10,
@@ -372,9 +382,28 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         regime,
       };
     })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, s.maxSpots)
-    .map((sp, i) => ({ ...sp, id: `P${String(i + 1).padStart(2, '0')}` }));
+    .sort((a, b) => b.score - a.score);
+
+  // Raggiungibilità: strada percorribile in auto più vicina e minuti a piedi. Oltre il limite lo spot
+  // non conta: nessuno cammina ore "alla cieca" verso un posto che non conosce.
+  onStep('Controllo quanto sono lontani dalla strada…', 0.92);
+  const maxWalk = s.maxWalkMin ?? 40;
+  const final = [];
+  let excludedFar = 0;
+  for (const sp of ranked) {
+    if (final.length >= s.maxSpots) break;
+    let road = null;
+    try { road = await nearestRoad(sp.lat, sp.lon); } catch { road = null; }
+    if (road) {
+      const roadElev = mosaic.elevation(road.lat, road.lon);
+      const ascent = Number.isFinite(roadElev) && roadElev > -500 ? sp.elevation - roadElev : 0;
+      sp.access = { road: { lat: road.lat, lon: road.lon, name: road.name }, distM: road.distM, ascent: Math.round(ascent), walkMin: walkMinutes(road.distM, ascent) };
+      if (sp.access.walkMin > maxWalk) { excludedFar++; continue; }
+    }
+    final.push(sp);
+    onStep('Controllo quanto sono lontani dalla strada…', 0.92 + (final.length / s.maxSpots) * 0.02);
+  }
+  final.forEach((sp, i) => { sp.id = `P${String(i + 1).padStart(2, '0')}`; });
 
   // Timer: dalla pioggia caduta nella zona dello spot migliore di ciascun tipo di bosco (fallback: valle)
   const timers = {};
@@ -386,13 +415,22 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   }
   for (const sp of final) { delete sp._w; }
 
-  // Zone: partendo dallo spot migliore, gli spot entro 2 km da lui -> un'area compatta da girare in una sola uscita
+  // Zone: partendo dallo spot migliore, gli spot entro 1,5 km da lui (quindi mai più di 3 km tra due spot)
+  // e senza una valle profonda in mezzo: il fondovalle allunga molto il giro reale
+  const valleyBetween = (a, b) => {
+    const low = Math.min(a.elevation, b.elevation);
+    for (let t = 0.1; t < 1; t += 0.1) {
+      const e = mosaic.elevation(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t);
+      if (Number.isFinite(e) && e > -500 && low - e > 150) return true; // si scende più di 150 m sotto lo spot più basso
+    }
+    return false;
+  };
   const zoneOf = new Map();
   let zi = 0;
   for (const sp of final) { // final è già ordinato dal migliore
     if (zoneOf.has(sp.id)) continue;
     zoneOf.set(sp.id, zi);
-    for (const o of final) if (!zoneOf.has(o.id) && distKm(sp, o) <= 2) zoneOf.set(o.id, zi);
+    for (const o of final) if (!zoneOf.has(o.id) && distKm(sp, o) <= 1.5 && !valleyBetween(sp, o)) zoneOf.set(o.id, zi);
     zi++;
   }
   const zones = [];
@@ -407,7 +445,10 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       rest.sort((a, b) => distKm(last, a) - distKm(last, b));
       km += distKm(last, rest[0]); order.push(rest.shift());
     }
+    // parcheggio: la strada dello spot più vicino a una strada (il giro parte e torna lì)
+    const withRoad = ms.filter((sp) => sp.access).sort((a, b) => a.access.walkMin - b.access.walkMin);
     zones.push({
+      parking: withRoad.length ? { ...withRoad[0].access.road, walkMin: withRoad[0].access.walkMin, spot: withRoad[0].id } : null,
       spots: order.map((sp) => sp.id), count: ms.length, best: ms[0].score,
       mean: Math.round(ms.reduce((a, sp) => a + sp.score, 0) / ms.length),
       tourKm: Math.round(km * 10) / 10,
@@ -444,7 +485,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
       let best = null;
       for (const g of groups) {
-        const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime }, ctx, g.key);
+        const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
         const fin = combine(pl.score, tm, g.weight, 1);
         if (!best || fin > best.fin) best = { fin, pl, g };
       }
@@ -469,6 +510,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         protected: protectedAt(protectedFc, place.lat, place.lon),
         regime, idealDays: ideal.idealDays, idealSource: ideal.source,
         rainSrc: w.rainSrc,
+        wind: windInfo(best.pl.windF, tm.wind),
         nPos: sm.nPos, total: sm.total, lastVisit: sm.lastPositive?.datetime || null,
       });
     } catch (e) { console.warn('fungaia', place.id, e); }
@@ -492,7 +534,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     date, center, radius, valleyElev,
     settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto' },
     summary, groups, timers, spots: final, fungaie, zones, overlay, contours,
-    scan: { areas: areas.length, fine: true },
+    scan: { areas: areas.length, fine: true, excludedFar, maxWalk },
     protectedFc, forestChecked: !!forest, demZoom: mosaic.z,
     clim, tc,
   };

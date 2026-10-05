@@ -33,7 +33,7 @@ export function buildGpx(analysis, finds = [], { nearKm = 3, car = null } = {}) 
   }
   for (const f of finds.filter((x) => !x.deleted)) {
     const vs = [...(f.visits || [])].sort((a, b) => (b.datetime || '').localeCompare(a.datetime || ''));
-    const pos = vs.filter((v) => v.count > 0);
+    const pos = vs.filter((v) => v.count > 0 && v.kind !== 'altro');
     const last = vs[0];
     const when = new Date(last?.datetime || f.createdAt);
     const today = analysis?.fungaie?.find((x) => x.placeId === f.id);
@@ -42,7 +42,7 @@ export function buildGpx(analysis, finds = [], { nearKm = 3, car = null } = {}) 
       pos.length ? `${pos.length} ritrovamenti, ${pos.reduce((a, v) => a + v.count, 0)} esemplari` : 'Uscita a vuoto',
       f.elevation != null ? `Quota ${Math.round(f.elevation)} m, esposizione ${f.aspectLabel || '-'}` : '',
       f.forest ? `Bosco: ${f.forest}` : '',
-      ...vs.map((v) => `${new Date(v.datetime).toLocaleDateString('it-IT')}: ${v.count > 0 ? `${v.count} esemplari${v.weightKg ? ` (${v.weightKg} kg)` : ''}${v.age ? `, ${{ nuovo: 'appena nati', maturo: 'maturi', vecchio: 'vecchi' }[v.age]}` : ''}${v.state ? `, ${{ sano: 'sani', bacato: 'bacati', rotto: 'rotti' }[v.state]}` : ''}` : 'niente'}${v.notes ? ` – ${v.notes}` : ''}`),
+      ...vs.map((v) => `${new Date(v.datetime).toLocaleDateString('it-IT')}: ${v.kind === 'altro' ? `altro fungo: ${v.otherName} ×${v.count}` : v.count > 0 ? `${v.count} esemplari${v.weightKg ? ` (${v.weightKg} kg)` : ''}${v.age ? `, ${{ nuovo: 'appena nati', maturo: 'maturi', vecchio: 'vecchi' }[v.age]}` : ''}${v.state ? `, ${{ sano: 'sani', bacato: 'bacati', rotto: 'rotti' }[v.state]}` : ''}` : 'niente'}${v.notes ? ` – ${v.notes}` : ''}`),
     ].filter(Boolean).join('\n');
     const name = pos.length ? `Fungaia (${pos.length}×) ${when.toLocaleDateString('it-IT')}` : `Vuoto ${when.toLocaleDateString('it-IT')}`;
     parts.push(`<wpt lat="${n6(f.lat)}" lon="${n6(f.lon)}">${f.elevation != null ? `<ele>${Math.round(f.elevation)}</ele>` : ''}<time>${when.toISOString()}</time><name>${esc(name)}</name><desc>${esc(desc)}</desc><sym>${pos.length ? 'Pin, Red' : 'Pin, Blue'}</sym><type>${pos.length ? 'Fungaia' : 'Uscita a vuoto'}</type></wpt>`);

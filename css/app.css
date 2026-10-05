@@ -84,6 +84,7 @@ svg.i { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-widt
 .find-pin svg { width: 18px; height: 18px; }
 .find-pin { position: relative; }
 .find-pin.empty { background: #78716c; opacity: .85; }
+.find-pin.other { background: #7c3aed; opacity: .85; }
 .find-pin .n { position: absolute; top: -6px; right: -6px; background: #15803d; color: #fff; font-size: 10px; font-weight: 800; border-radius: 999px; min-width: 16px; height: 16px; display: grid; place-items: center; padding: 0 4px; border: 1.5px solid #fff; }
 .card.empty-place { opacity: .75; }
 .card.visit { background: var(--surface); }

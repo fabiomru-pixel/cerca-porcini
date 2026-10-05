@@ -60,16 +60,21 @@ export function normalizeFind(f) {
   return place;
 }
 
-export const isPositive = (v) => (v.count || 0) > 0;
+// "altro fungo" (es. mazze di tamburo): resta in archivio ma non conta né come porcini né come uscita a vuoto
+export const isOther = (v) => v.kind === 'altro';
+export const isPositive = (v) => (v.count || 0) > 0 && !isOther(v);
 export function placeSummary(f) {
   const vs = [...(f.visits || [])].sort((a, b) => (b.datetime || '').localeCompare(a.datetime || ''));
   const pos = vs.filter(isPositive);
+  const other = vs.filter(isOther);
   return {
+    other, nOther: other.length,
     visits: vs, last: vs[0] || null, lastPositive: pos[0] || null,
-    nPos: pos.length, nNeg: vs.length - pos.length,
+    nPos: pos.length, nNeg: vs.length - pos.length - other.length,
     total: pos.reduce((a, v) => a + (v.count || 0), 0),
     weight: pos.reduce((a, v) => a + (v.weightKg || 0), 0),
-    emptyOnly: vs.length > 0 && !pos.length,
+    emptyOnly: vs.length > 0 && !pos.length && !other.length,
+    otherOnly: other.length > 0 && !pos.length,
     first: vs[vs.length - 1] || null,
   };
 }
@@ -309,7 +314,7 @@ export function computeLearn(allFinds) {
   for (const raw of allFinds) {
     if (!raw || raw.deleted) continue;
     const place = normalizeFind(raw);
-    for (const v of place.visits || []) if (v.snapshot) entries.push({ place, v, s: v.snapshot, pos: isPositive(v) });
+    for (const v of place.visits || []) if (v.snapshot && !isOther(v)) entries.push({ place, v, s: v.snapshot, pos: isPositive(v) });
   }
   const pos = entries.filter((e) => e.pos), neg = entries.filter((e) => !e.pos);
   const weight = (e) => (e.pos ? 1 + Math.log2(1 + e.v.count) / 2 : 1); // più esemplari = segnale più forte
