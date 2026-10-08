@@ -1225,7 +1225,16 @@ async function init() {
   updateStorageInfo();
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
+    // nuova versione installata: ricarico subito (se non sto calcolando) per non restare sulla vecchia
+    const hadSW = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadSW) return;
+      if ($('#progress').hidden) location.reload();
+      else toast('Nuova versione pronta: riapri l’app quando hai finito', 6000);
+    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+      .then((r) => r.update())
+      .catch((e) => console.warn('SW', e));
   }
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
 }

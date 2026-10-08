@@ -1,5 +1,5 @@
 // Service worker: app disponibile offline + cache delle mappe e dell'altimetria
-const SHELL = 'cp-shell-v23';
+const SHELL = 'cp-shell-v24';
 // solo risposte CORS: le risposte "opache" Chrome le conta ~7 MB l'una e satura lo spazio del sito
 const TILES = 'cp-tiles-v2';
 const FILES = [
@@ -14,7 +14,7 @@ const FILES = [
 const TILE_HOSTS = ['tile.opentopomap.org', 'tile.openstreetmap.org', 'server.arcgisonline.com', 'elevation-tiles-prod'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -53,7 +53,7 @@ self.addEventListener('fetch', (e) => {
       try {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), 4000);
-        const res = await fetch(req, { signal: ctrl.signal });
+        const res = await fetch(req, { signal: ctrl.signal, cache: 'no-cache' }); // salta la cache HTTP (GitHub Pages: 10 min)
         clearTimeout(t);
         if (res.ok) c.put(req, res.clone());
         return res;
