@@ -58,11 +58,28 @@ async function worker() {
     }
     done++;
     if (done % 50 === 0) log(`${done}/${stations.length} stazioni, ${out.length} valide`);
-    await sleep(100);
+    await sleep(60);
   }
 }
-await Promise.all([worker(), worker(), worker(), worker()]);
-if (out.length < 50) { log(`Troppo poche stazioni valide (${out.length}): non sovrascrivo il file.`); process.exit(1); }
+await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+log(`Scaricate ${out.length} stazioni su ${stations.length}`);
+
+// Se il SIR ha risposto solo in parte (succede dai server di GitHub), tengo i dati precedenti delle
+// stazioni mancanti per i giorni in comune: meglio un dato di ieri che nessun dato.
+let prev = null;
+try { prev = JSON.parse(fs.readFileSync(OUT, 'utf8')); } catch { prev = null; }
+if (prev?.stations?.length) {
+  const have = new Set(out.map((x) => x.id));
+  let kept = 0;
+  for (const p of prev.stations) {
+    if (have.has(p.id)) continue;
+    const r = {};
+    prev.days.forEach((d, i) => { if (p.r[i] != null) { r[d] = p.r[i]; allDays.add(d); } });
+    if (Object.keys(r).length >= 10) { out.push({ id: p.id, n: p.n, lat: p.lat, lon: p.lon, el: p.el, r }); kept++; }
+  }
+  if (kept) log(`Recuperate dal file precedente ${kept} stazioni non scaricate in questo giro`);
+}
+if (out.length < 300) { log(`Troppo poche stazioni (${out.length}): non sovrascrivo il file.`); process.exit(1); }
 
 // il giorno corrente è parziale: lo escludo
 const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });

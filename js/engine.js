@@ -64,10 +64,11 @@ export function summarize(days, dateStr, s) {
   const win = days.slice(Math.max(0, idx - s.windowDays), idx);
   const meanMax = avg(win.map((d) => d.tmax));
   const meanMin = avg(win.map((d) => d.tmin));
-  const rainFrom = idx - s.rainWindowDays;
-  const rainDays = days.slice(Math.max(0, rainFrom), idx);
+  // 20 giorni compreso il giorno scelto: la pioggia già caduta (o prevista) quel giorno conta
+  const rainFrom = idx - s.rainWindowDays + 1;
+  const rainDays = days.slice(Math.max(0, rainFrom), idx + 1);
   const rainTotal = rainDays.reduce((a, d) => a + (d.rain ?? 0), 0);
-  const eps = rainEpisodes(days, rainFrom, idx - 1, s.rainEventMm).map((e) => ({
+  const eps = rainEpisodes(days, rainFrom, idx, s.rainEventMm).map((e) => ({
     start: days[e.startIdx].date, end: days[e.endIdx].date, total: e.total, daysSince: idx - e.endIdx,
   }));
   return {
@@ -200,9 +201,9 @@ export function timerScore(daysSince, t) {
 export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   const days = wp.days;
   const idx = days.findIndex((d) => d.date === dateStr);
-  const from = idx - s.rainWindowDays;
-  const rainTotal = days.slice(Math.max(0, from), idx).reduce((a, d) => a + (d.rain ?? 0), 0);
-  const eps = rainEpisodes(days, from, idx - 1, s.rainEventMm);
+  const from = idx - s.rainWindowDays + 1; // 20 giorni compreso il giorno scelto
+  const rainTotal = days.slice(Math.max(0, from), idx + 1).reduce((a, d) => a + (d.rain ?? 0), 0);
+  const eps = rainEpisodes(days, from, idx, s.rainEventMm);
   const t = forestTimer(forestKey, learn);
   const dT = cellElev != null && wp.elevation != null ? ((cellElev - wp.elevation) * s.gradient) / 100 : 0;
 
@@ -226,7 +227,7 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   const lastEp = eps[eps.length - 1];
   const wind = windLoads(days, lastEp ? lastEp.endIdx + 1 : Math.max(0, from), idx);
   // ultima pioggia utile in assoluto (anche oltre i 20 giorni, fin dove arrivano i dati)
-  const anyEps = rainEpisodes(days, 0, idx - 1, s.rainEventMm);
+  const anyEps = rainEpisodes(days, 0, idx, s.rainEventMm);
   const lastAny = anyEps[anyEps.length - 1];
   const lastRainDays = lastAny ? idx - lastAny.endIdx : null;
   const lastRainDate = lastAny ? days[lastAny.endIdx].date : null;
@@ -306,7 +307,7 @@ export function soilMoisture(days, idx) {
   const cap = SOIL.capacity;
   let w = cap * SOIL.start;
   const from = Math.max(0, idx - SOIL.spinup);
-  for (let i = from; i < idx; i++) {
+  for (let i = from; i <= idx && i < days.length; i++) {
     const d = days[i];
     // senza dato di evaporazione: stima grezza dalla temperatura media
     const et = d.et0 ?? Math.max(0.3, 0.17 * ((d.tmax + d.tmin) / 2) - 0.6);
