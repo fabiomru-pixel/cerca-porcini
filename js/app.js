@@ -95,6 +95,93 @@ function initMap() {
   });
 }
 
+// ---------------------------------------------------------------- ricerca luogo
+// Photon (komoot, dati OpenStreetMap): gratuito, pensato anche per i suggerimenti mentre si scrive
+const PHOTON = 'https://photon.komoot.io/api/';
+function placeLabel(p) {
+  const comune = p.city && p.city !== p.name ? p.city : (p.county && p.county !== p.name ? p.county : '');
+  return { name: p.name || p.street || '', sub: [comune, p.state].filter(Boolean).join(', ') };
+}
+function initSearch() {
+  const box = $('#search'), inp = $('#searchInput'), list = $('#searchList'), clr = $('#searchClear');
+  $('#searchIco').innerHTML = icon('search');
+  clr.innerHTML = icon('x');
+  let results = [], act = -1, timer = null, ctrl = null;
+  const close = () => { list.hidden = true; act = -1; };
+  const show = () => {
+    list.innerHTML = results.length
+      ? results.map((r, i) => `<li data-i="${i}" class="${i === act ? 'act' : ''}">${esc(r.name)}${r.sub ? ` <small>${esc(r.sub)}</small>` : ''}</li>`).join('')
+      : '<li class="none">Nessun luogo trovato</li>';
+    list.hidden = false;
+  };
+  const pick = (r) => {
+    if (!r) return;
+    inp.value = r.sub ? `${r.name}, ${r.sub}` : r.name;
+    close(); inp.blur();
+    state.start = { lat: r.lat, lon: r.lon, manual: true };
+    renderStart(); drawMe();
+    map.setView([r.lat, r.lon], Math.max(map.getZoom(), 13), { animate: false });
+    // il punto al centro della parte di mappa non coperta dal pannello
+    const pr = $('#panel').getBoundingClientRect(), mr = map.getContainer().getBoundingClientRect();
+    if (window.innerWidth >= 900) map.panBy([-(pr.right - mr.left) / 2, 0], { animate: false });
+    else if (pr.top < mr.bottom) map.panBy([0, (mr.bottom - pr.top) / 2], { animate: false });
+    toast(`Punto di partenza: ${r.name}`);
+  };
+  async function query(q) {
+    // coordinate scritte a mano: "43.95, 10.82"
+    const m = q.match(/^s*(-?d{1,2}[.,]d+)s*[,;s]s*(-?d{1,3}[.,]d+)s*$/);
+    if (m) {
+      const lat = Number(m[1].replace(',', '.')), lon = Number(m[2].replace(',', '.'));
+      results = [{ name: `${lat.toFixed(5)}, ${lon.toFixed(5)}`, sub: 'coordinate', lat, lon }];
+      act = 0; show(); return;
+    }
+    if (q.trim().length < 3) { results = []; close(); return; }
+    ctrl?.abort(); ctrl = new AbortController();
+    const c = map.getCenter();
+    const url = `${PHOTON}?q=${encodeURIComponent(q)}&limit=8&lat=${c.lat.toFixed(3)}&lon=${c.lng.toFixed(3)}&bbox=6.5,36.5,18.6,47.2`;
+    try {
+      const j = await (await fetch(url, { signal: ctrl.signal })).json();
+      const seen = new Set();
+      results = [];
+      for (const f of j.features || []) {
+        const l = placeLabel(f.properties);
+        const key = `${l.name}|${l.sub}`;
+        if (!l.name || seen.has(key)) continue;
+        seen.add(key);
+        results.push({ ...l, lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] });
+        if (results.length >= 6) break;
+      }
+      act = -1; show();
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      list.innerHTML = `<li class="none">${navigator.onLine ? 'Ricerca non disponibile, riprova' : 'Serve la connessione per cercare'}</li>`;
+      list.hidden = false;
+    }
+  }
+  inp.addEventListener('input', () => {
+    clr.hidden = !inp.value;
+    clearTimeout(timer); timer = setTimeout(() => query(inp.value), 280);
+  });
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!results.length) return;
+      e.preventDefault();
+      act = (act + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length; show();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (results.length) pick(results[Math.max(0, act)]);
+      else { clearTimeout(timer); query(inp.value).then(() => results.length && pick(results[0])); }
+    } else if (e.key === 'Escape') close();
+  });
+  inp.addEventListener('focus', () => { if (results.length && inp.value) show(); });
+  list.addEventListener('pointerdown', (e) => {
+    const li = e.target.closest('li[data-i]');
+    if (li) { e.preventDefault(); pick(results[Number(li.dataset.i)]); }
+  });
+  clr.onclick = () => { inp.value = ''; clr.hidden = true; results = []; close(); inp.focus(); };
+  document.addEventListener('pointerdown', (e) => { if (!box.contains(e.target)) close(); });
+}
+
 // cerchio del raggio scelto attorno al punto di partenza (anteprima mentre si trascina la barra)
 let radiusCircle = null, radiusFitT = null;
 function drawRadiusPreview(km, fit = false) {
@@ -1204,6 +1291,7 @@ async function init() {
   if (!state.settings.driveClientId) state.settings.driveClientId = DEFAULT_SETTINGS.driveClientId;
   applyTheme(state.settings.theme);
   initMap();
+  initSearch();
   bindUI();
   renderControls();
   renderSyncStatus();

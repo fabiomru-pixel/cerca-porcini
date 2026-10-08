@@ -262,3 +262,17 @@ ol.steps li { margin-bottom: 4px; }
   body[data-sheet="full"] .map-ctrls { display: none; }
   .leaflet-control-container .leaflet-top.leaflet-right { top: 0; }
 }
+
+/* ---------- Ricerca luogo ---------- */
+.search { position: fixed; top: calc(var(--appbar-h) + 10px); left: calc(var(--panel-w) + 24px); width: min(420px, calc(100vw - var(--panel-w) - 90px)); z-index: 1050;
+  display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 0 4px 0 10px; }
+.search > span { display: grid; color: var(--muted); }
+.search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 15px; padding: 10px 4px; outline: none; }
+.search input::-webkit-search-cancel-button { display: none; }
+.search .icon-btn { width: 34px; height: 34px; }
+.search-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); max-height: 50vh; overflow-y: auto; }
+.search-list li { padding: 9px 10px; border-radius: 8px; cursor: pointer; font-size: 14px; line-height: 1.3; }
+.search-list li small { display: block; color: var(--muted); font-size: 12.5px; }
+.search-list li:hover, .search-list li.act { background: var(--surface-2); }
+.search-list li.none { color: var(--muted); cursor: default; }
+@media (max-width: 899px) { .search { left: 12px; width: auto; right: 62px; } body[data-sheet="full"] .search { display: none; } }

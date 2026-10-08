@@ -1,7 +1,7 @@
 // Regole di base (dalle slide) e parametri predefiniti.
 // Tutto ciò che è "regolabile" finisce nelle impostazioni utente (db 'settings').
 
-export const APP_VERSION = '1.10.4';
+export const APP_VERSION = '1.11.0';
 
 export const DEFAULT_SETTINGS = {
   gradient: 0.6,          // °C ogni 100 m (regolabile 0,6–0,7)
