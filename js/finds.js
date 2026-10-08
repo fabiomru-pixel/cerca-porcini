@@ -214,6 +214,10 @@ async function dailyAround(lat, lon, date, before = 45) {
   return fetchDailyArchive(lat, lon, addDays(date, -before), date);
 }
 
+// Versione del calcolo meteo dei ritrovamenti: quando cambia, i dati salvati vengono ricalcolati da soli
+// 2 = pioggia da media di 3 modelli + pluviometri SIR (le fungaie salvate prima usavano il vecchio modello)
+export const SNAPSHOT_VER = 2;
+
 async function snapshotFor(place, v, s) {
   const date = v.datetime.slice(0, 10);
   if (date > todayStr()) return null;
@@ -228,7 +232,7 @@ async function snapshotFor(place, v, s) {
   const eps = rainEpisodes(w.days, idx - s.rainWindowDays, idx - 1, s.rainEventMm);
   const last = eps[eps.length - 1];
   const rain = w.days.slice(Math.max(0, idx - s.rainWindowDays), idx).reduce((a, d) => a + (d.rain ?? 0), 0);
-  const soilTheta = soilMoisture(w.days, idx);
+  const soilTheta = soilMoisture(w.days, idx - 1); // stato del suolo la mattina del ritrovamento (prima della pioggia di quel giorno)
   const expo = place.slope >= 3 ? -Math.cos((place.aspect * Math.PI) / 180) * Math.min(1, place.slope / 12) * ((s.southOffsetM * g) / 100) : 0;
 
   // condizioni avverse nei 7 giorni prima (per i funghi "rotti da calore o vento")
@@ -245,6 +249,8 @@ async function snapshotFor(place, v, s) {
   const dry = soilTheta < 0.3 || rain < s.rainMinMm;
 
   return {
+    ver: SNAPSHOT_VER,
+    rainSrc: w.rainSrc?.type === 'pluviometri' ? { type: 'pluviometri', stations: w.rainSrc.stations } : { type: 'modelli' },
     meanT: Math.round(meanT * 10) / 10,
     meanMax: Math.round(meanMax * 10) / 10,
     groundT: Math.round((meanT + expo + forestTempOffset(place.elevation, place.forestKey)) * 10) / 10,
@@ -281,6 +287,10 @@ export async function processPending(settings) {
       }
       if (!place.pending?.terrain) {
         for (const v of place.visits) {
+          // dati meteo calcolati con una versione vecchia: da rifare
+          if (v.snapshot && v.snapshot.ver !== SNAPSHOT_VER && v.datetime && v.datetime.slice(0, 10) <= todayStr()) {
+            v.pending = { ...(v.pending || {}), snapshot: true };
+          }
           const p = v.pending;
           if (!p) continue;
           try {
