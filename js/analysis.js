@@ -529,6 +529,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         forest: FORESTS[fk].label,
         forestType: patch ? `${patch.type}, copertura ${Math.round(patch.frac * 100)}%` : place.forest || null,
         rainTotal: Math.round(tm.rainTotal), daysSince: tm.daysSince, killers: tm.killers,
+        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate,
         protected: protectedAt(protectedFc, place.lat, place.lon),
         regime, idealDays: ideal.idealDays, idealSource: ideal.source,
         rainSrc: w.rainSrc,
