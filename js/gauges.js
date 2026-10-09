@@ -9,7 +9,8 @@ import { SIR_PROXY_URL } from './config.js';
 const MAX_KM = 12;
 const MAX_AGE_DAYS = 3;
 const LIVE_TTL = 30 * 60 * 1000; // dati in diretta validi 30 minuti
-const BATCH = 40;                // stazioni per richiesta al servizio
+const BATCH = 6;  // stazioni per richiesta: gruppi piccoli = arriva in tempo almeno una parte
+const WAIT_MS = 15000; // il SIR risponde lento a Cloudflare: oltre questa attesa uso il file (e il servizio intanto mette in cache)
 let baseP = null;
 const live = new Map();          // id -> { t, r: { 'AAAA-MM-GG': mm } }
 
@@ -32,7 +33,7 @@ async function fetchLive(ids) {
   for (let i = 0; i < todo.length; i += BATCH) batches.push(todo.slice(i, i + BATCH));
   await Promise.all(batches.map(async (b) => {
     try {
-      const r = await fetch(`${SIR_PROXY_URL}?ids=${b.join(',')}`, { signal: AbortSignal.timeout(20000) });
+      const r = await fetch(`${SIR_PROXY_URL}?ids=${b.join(',')}`, { signal: AbortSignal.timeout(WAIT_MS) });
       if (!r.ok) return;
       const j = await r.json();
       for (const [id, days] of Object.entries(j.stations || {})) live.set(id, { t: Date.now(), r: days });

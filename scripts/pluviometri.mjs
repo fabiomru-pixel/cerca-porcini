@@ -27,11 +27,24 @@ async function get(url, tries = 2) {
   throw new Error(`${url.slice(0, 90)}: ${last?.message}`);
 }
 
+// Dai server di GitHub (USA) il SIR spesso non risponde: in quel caso passo dal servizio Cloudflare
+// (cloudflare/sir-worker.js), più lento ma raggiungibile. SIR_PROXY = indirizzo del servizio.
+const PROXY = process.env.SIR_PROXY || '';
+let prev = null;
+try { prev = JSON.parse(fs.readFileSync(OUT, 'utf8')); } catch { prev = null; }
+
 log('Scarico l\'elenco delle stazioni…');
-const list = JSON.parse(await get('https://www.sir.toscana.it/open_layers/ajax_stations.php?bbox=9.5,42.2,12.5,44.6&zoom=12&types=pluvio', 3));
-const stations = list.features
-  .filter((f) => /Stazione autom/.test(f.description))
-  .map((f) => ({ id: f.id, n: f.name, lat: f.lat, lon: f.lon, el: Math.round(Number((f.description.match(/Quota staz\. slm \[m\]<\/b>\s*([\d.]+)/) || [])[1] || 0)) }));
+let stations;
+try {
+  const list = JSON.parse(await get('https://www.sir.toscana.it/open_layers/ajax_stations.php?bbox=9.5,42.2,12.5,44.6&zoom=12&types=pluvio', 2));
+  stations = list.features
+    .filter((f) => /Stazione autom/.test(f.description))
+    .map((f) => ({ id: f.id, n: f.name, lat: f.lat, lon: f.lon, el: Math.round(Number((f.description.match(/Quota staz\. slm \[m\]<\/b>\s*([\d.]+)/) || [])[1] || 0)) }));
+} catch (e) {
+  if (!prev?.stations?.length) throw e;
+  log('Elenco non raggiungibile, uso quello del file precedente:', e.message);
+  stations = prev.stations.map(({ id, n, lat, lon, el }) => ({ id, n, lat, lon, el }));
+}
 log('Stazioni automatiche:', stations.length);
 
 const out = [];
@@ -54,20 +67,53 @@ async function worker() {
       fails++;
       if (fails <= 3) log('Errore:', e.message);
       // se le prime richieste falliscono tutte, il sito non è raggiungibile da qui: inutile insistere
-      if (done < 12 && fails >= 8) { log('Il sito SIR non risponde da questo server: interrompo.'); process.exit(1); }
+      if (done < 12 && fails >= 8) { log('Il sito SIR non risponde da questo server: interrompo.'); queue.length = 0; return; }
     }
     done++;
     if (done % 50 === 0) log(`${done}/${stations.length} stazioni, ${out.length} valide`);
     await sleep(60);
   }
 }
-await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+const retry = [];
+let retried = false;
+async function proxyWorker() {
+  while (queue.length && Date.now() < DEADLINE) {
+    const b = queue.splice(0, 12); // max 12 per richiesta (limite del piano gratuito Cloudflare)
+    try {
+      const r = await fetch(`${PROXY}?ids=${b.map((s) => s.id).join(',')}`, { headers: UA, signal: AbortSignal.timeout(120000) });
+      const j = await r.json();
+      for (const s of b) {
+        const days = j.stations?.[s.id];
+        if (!days || Object.keys(days).length < 10) { fails++; if (!retried) retry.push(s); continue; }
+        for (const d of Object.keys(days)) allDays.add(d);
+        out.push({ ...s, r: days });
+      }
+    } catch (e) { fails += b.length; if (!retried) retry.push(...b); log('Errore servizio:', e.message); }
+    done += b.length;
+    log(`${done}/${stations.length} stazioni, ${out.length} valide`);
+  }
+}
+let direct = !PROXY;
+const FORCE = !!process.env.SIR_FORCE_PROXY; // solo per prove
+if (PROXY && !FORCE) {
+  // prova veloce: se il SIR risponde direttamente il servizio non serve
+  try { await get(`https://www.sir.toscana.it/monitoraggio/dettaglio.php?id=${stations[0].id}&type=pluvio_men`, 1); direct = true; } catch { direct = false; }
+  log(direct ? 'Il SIR risponde direttamente' : 'Il SIR non risponde: passo dal servizio Cloudflare');
+}
+if (direct) await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+else {
+  await Promise.all([proxyWorker(), proxyWorker(), proxyWorker(), proxyWorker(), proxyWorker(), proxyWorker()]);
+  // secondo giro per le stazioni mancate: intanto il servizio ha messo in cache le risposte lente
+  if (retry.length && Date.now() < DEADLINE) {
+    log(`Secondo giro per ${retry.length} stazioni`);
+    retried = true; fails = 0; queue.push(...retry.splice(0));
+    await Promise.all([proxyWorker(), proxyWorker(), proxyWorker(), proxyWorker(), proxyWorker(), proxyWorker()]);
+  }
+}
 log(`Scaricate ${out.length} stazioni su ${stations.length}`);
 
 // Se il SIR ha risposto solo in parte (succede dai server di GitHub), tengo i dati precedenti delle
 // stazioni mancanti per i giorni in comune: meglio un dato di ieri che nessun dato.
-let prev = null;
-try { prev = JSON.parse(fs.readFileSync(OUT, 'utf8')); } catch { prev = null; }
 if (prev?.stations?.length) {
   const have = new Set(out.map((x) => x.id));
   let kept = 0;

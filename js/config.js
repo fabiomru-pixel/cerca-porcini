@@ -1,7 +1,7 @@
 // Regole di base (dalle slide) e parametri predefiniti.
 // Tutto ciò che è "regolabile" finisce nelle impostazioni utente (db 'settings').
 
-export const APP_VERSION = '1.12.0';
+export const APP_VERSION = '1.12.1';
 
 export const DEFAULT_SETTINGS = {
   gradient: 0.6,          // °C ogni 100 m (regolabile 0,6–0,7)
@@ -102,4 +102,4 @@ export const EEA_PROTECTED_URL =
 
 // Servizio Cloudflare che legge i pluviometri SIR per l'app (codice in cloudflare/sir-worker.js).
 // Vuoto = si usa solo data/pluviometri.json
-export const SIR_PROXY_URL = '';
+export const SIR_PROXY_URL = 'https://sir-pluviometri.fabio-mru.workers.dev/';

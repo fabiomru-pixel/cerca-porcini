@@ -1,7 +1,8 @@
 name: Pluviometri SIR Toscana
 
-# Riserva: prova a scaricare i pluviometri SIR anche da GitHub. Dal 8/10/2026 il SIR spesso non risponde ai server
-# di GitHub (USA): in quel caso il lavoro finisce senza errore (niente email) e resta il file caricato dal PC.
+# Due volte al giorno scarica i pluviometri SIR in data/pluviometri.json. Dal 8/10/2026 il SIR spesso non risponde ai server
+# di GitHub (USA): lo script allora passa dal servizio Cloudflare (SIR_PROXY). Se fallisce comunque, il lavoro
+# finisce senza errore (niente email) e resta il file precedente.
 on:
   schedule:
     - cron: '30 4 * * *'
@@ -18,7 +19,7 @@ permissions:
 jobs:
   aggiorna:
     runs-on: ubuntu-latest
-    timeout-minutes: 16
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,6 +29,8 @@ jobs:
         id: scarica
         continue-on-error: true
         run: node scripts/pluviometri.mjs
+        env:
+          SIR_PROXY: https://sir-pluviometri.fabio-mru.workers.dev/
       - name: Salva nel repository
         if: steps.scarica.outcome == 'success'
         run: |
