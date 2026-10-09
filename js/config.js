@@ -1,7 +1,7 @@
 // Regole di base (dalle slide) e parametri predefiniti.
 // Tutto ciò che è "regolabile" finisce nelle impostazioni utente (db 'settings').
 
-export const APP_VERSION = '1.11.0';
+export const APP_VERSION = '1.12.0';
 
 export const DEFAULT_SETTINGS = {
   gradient: 0.6,          // °C ogni 100 m (regolabile 0,6–0,7)
@@ -99,3 +99,7 @@ export const FOREST_TYPE_URL =
 
 export const EEA_PROTECTED_URL =
   'https://bio.discomap.eea.europa.eu/arcgis/rest/services/ProtectedSites/CDDA_Dyna_WM/MapServer/3/query';
+
+// Servizio Cloudflare che legge i pluviometri SIR per l'app (codice in cloudflare/sir-worker.js).
+// Vuoto = si usa solo data/pluviometri.json
+export const SIR_PROXY_URL = '';

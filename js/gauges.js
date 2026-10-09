@@ -1,25 +1,69 @@
-// Pioggia misurata dai pluviometri SIR Toscana (file aggiornato ogni notte da GitHub Actions).
+// Pioggia misurata dai pluviometri SIR Toscana.
+// Fonte principale: lettura in diretta dal telefono tramite il servizio Cloudflare (SIR_PROXY_URL), solo per le
+// stazioni vicine alla zona analizzata. Riserva: data/pluviometri.json (elenco stazioni + ultimi dati caricati).
 // Per un punto: stazioni entro 12 km, scarto di quelle fuori scala rispetto alle vicine,
 // mediana giornaliera delle 3 più vicine. Dove non ci sono stazioni resta la media dei modelli.
 import { distKm } from './geo.js';
+import { SIR_PROXY_URL } from './config.js';
 
 const MAX_KM = 12;
 const MAX_AGE_DAYS = 3;
-let gp = null;
+const LIVE_TTL = 30 * 60 * 1000; // dati in diretta validi 30 minuti
+const BATCH = 40;                // stazioni per richiesta al servizio
+let baseP = null;
+const live = new Map();          // id -> { t, r: { 'AAAA-MM-GG': mm } }
 
-export function loadGauges() {
-  if (gp) return gp;
-  gp = (async () => {
+function loadBase() {
+  if (!baseP) {
+    baseP = (async () => {
+      try {
+        const r = await fetch('data/pluviometri.json', { cache: 'no-cache' });
+        return r.ok ? await r.json() : null;
+      } catch { return null; }
+    })();
+  }
+  return baseP;
+}
+
+async function fetchLive(ids) {
+  if (!SIR_PROXY_URL) return;
+  const todo = ids.filter((id) => !(live.get(id)?.t > Date.now() - LIVE_TTL));
+  const batches = [];
+  for (let i = 0; i < todo.length; i += BATCH) batches.push(todo.slice(i, i + BATCH));
+  await Promise.all(batches.map(async (b) => {
     try {
-      const r = await fetch('data/pluviometri.json', { cache: 'no-cache' });
-      if (!r.ok) return null;
-      const g = await r.json();
-      if ((Date.now() - new Date(g.updated).getTime()) / 864e5 > MAX_AGE_DAYS) return null; // dati vecchi: meglio i modelli
-      g.index = new Map(g.days.map((d, i) => [d, i]));
-      return g;
-    } catch { return null; }
-  })();
-  return gp;
+      const r = await fetch(`${SIR_PROXY_URL}?ids=${b.join(',')}`, { signal: AbortSignal.timeout(20000) });
+      if (!r.ok) return;
+      const j = await r.json();
+      for (const [id, days] of Object.entries(j.stations || {})) live.set(id, { t: Date.now(), r: days });
+    } catch { /* servizio non raggiungibile: restano i dati del file */ }
+  }));
+}
+
+// area = { lat, lon, km }: legge in diretta le stazioni dentro l'area (più il margine di 12 km)
+export async function loadGauges(area) {
+  const base = await loadBase();
+  if (!base?.stations?.length) return null;
+  let stations = base.stations;
+  if (area) {
+    stations = stations.filter((st) => distKm(area, st) <= area.km + MAX_KM);
+    await fetchLive(stations.map((st) => st.id));
+  }
+  // il giorno in corso è parziale: per oggi resta la stima dei modelli
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+  const daySet = new Set(base.days);
+  for (const st of stations) for (const d of Object.keys(live.get(st.id)?.r || {})) if (d < today) daySet.add(d);
+  const days = [...daySet].sort();
+  const merged = stations.map((st) => {
+    const fromFile = {};
+    base.days.forEach((d, i) => { fromFile[d] = st.r[i]; });
+    const lv = live.get(st.id)?.r || {};
+    return { ...st, r: days.map((d) => (lv[d] !== undefined ? lv[d] : fromFile[d] ?? null)) };
+  });
+  const nLive = stations.filter((st) => live.has(st.id)).length;
+  const last = days[days.length - 1];
+  if (!last || (Date.now() - new Date(last).getTime()) / 864e5 > MAX_AGE_DAYS + 1) return null; // dati vecchi: meglio i modelli
+  return { days, stations: merged, live: nLive > 0, index: new Map(days.map((d, i) => [d, i])) };
 }
 
 const median = (xs) => {

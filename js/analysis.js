@@ -70,7 +70,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   // solo i giorni che servono: meno dati = meno "peso" sul limite del servizio gratuito
   const fDays = Math.max(1, ahead + 1);
   const onWait = (sec) => onStep(`Il servizio meteo chiede una pausa: riprovo tra ${sec} secondi…`, 0.45);
-  const G = await loadGauges(); // pluviometri SIR (null fuori Toscana o se il file non è aggiornato)
+  onStep('Leggo i pluviometri SIR…', 0.04);
+  const G = await loadGauges({ lat, lon, km: radius }); // pluviometri SIR (null fuori Toscana o se i dati sono vecchi)
   // pioggia del punto: misurata dai pluviometri vicini se ci sono, altrimenti media dei modelli
   const atPoint = (w, la, lo) => applyGauges({ ...w, lat: la, lon: lo, days: w.days.map((d) => ({ ...d, rain: d.rainModel ?? d.rain })) }, G);
   let [ref] = await fetchDaily([center], { pastDays, forecastDays: fDays, onWait });

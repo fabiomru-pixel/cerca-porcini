@@ -221,7 +221,7 @@ export const SNAPSHOT_VER = 2;
 async function snapshotFor(place, v, s) {
   const date = v.datetime.slice(0, 10);
   if (date > todayStr()) return null;
-  const w = applyGauges(await dailyAround(place.lat, place.lon, date), await loadGauges()); // pioggia misurata se disponibile
+  const w = applyGauges(await dailyAround(place.lat, place.lon, date), await loadGauges({ lat: place.lat, lon: place.lon, km: 0 })); // pioggia misurata se disponibile
   const idx = w.days.findIndex((d) => d.date === date);
   if (idx <= 0) return null;
   const g = s.gradient;
@@ -415,7 +415,7 @@ export async function predictPlace(place, s, learn) {
   place = normalizeFind(place);
   const { fk, idealDays, source } = placeIdealDays(place, learn);
   const [w0] = await fetchDaily([{ lat: place.lat, lon: place.lon }], { pastDays: 45, forecastDays: 16 });
-  const w = applyGauges(w0, await loadGauges());
+  const w = applyGauges(w0, await loadGauges({ lat: place.lat, lon: place.lon, km: 0 }));
   const today = todayStr();
   const idx = w.days.findIndex((d) => d.date === today);
   const eps = rainEpisodes(w.days, idx - 30, w.days.length - 1, s.rainEventMm).map((e) => ({
