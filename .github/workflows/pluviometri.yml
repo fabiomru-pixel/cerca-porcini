@@ -1,6 +1,7 @@
 name: Pluviometri SIR Toscana
 
-# Ogni notte (e alle 13:30) scarica la pioggia misurata dai pluviometri SIR e aggiorna data/pluviometri.json
+# Riserva: prova a scaricare i pluviometri SIR anche da GitHub. Dal 8/10/2026 il SIR spesso non risponde ai server
+# di GitHub (USA): in quel caso il lavoro finisce senza errore (niente email) e resta il file caricato dal PC.
 on:
   schedule:
     - cron: '30 4 * * *'
@@ -24,8 +25,11 @@ jobs:
         with:
           node-version: '22'
       - name: Scarica i pluviometri
+        id: scarica
+        continue-on-error: true
         run: node scripts/pluviometri.mjs
       - name: Salva nel repository
+        if: steps.scarica.outcome == 'success'
         run: |
           git config user.name "pluviometri-bot"
           git config user.email "fabiomru-pixel@users.noreply.github.com"
