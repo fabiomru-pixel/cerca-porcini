@@ -219,7 +219,7 @@ function navButtons(lat, lon, { walk = false, small = false } = {}) {
 function accessText(acc) {
   if (!acc) return '';
   const d = acc.distM < 1000 ? `${acc.distM} m` : `${fmt1(acc.distM / 1000)} km`;
-  return `Strada in auto a ${d} in linea d'aria · ~${acc.walkMin} min a piedi${acc.ascent ? ` (${acc.ascent > 0 ? '+' : ''}${acc.ascent} m)` : ''}`;
+  return `Strada a ${d} (${acc.walkMin} min a piedi)`;
 }
 // Vento forte dopo la pioggia e penalità del versante
 function windText(w) {
@@ -260,14 +260,13 @@ function spotPopup(s) {
     <span class="muted">Timer di questa fungaia: ideale ${s.idealDays} giorni dopo la pioggia${s.daysSince != null ? ` · oggi ${s.daysSince} gg dalla pioggia` : ''}</span></div>` : '';
   return `<b>${s.id} · ${s.score}/100</b><br>${fung}${zoneTxt}
     ${s.elevation} m · esposizione ${s.aspectLabel} · pendenza ${s.slope}°<br>
-    ${esc(s.forest)}${s.forestType ? ` <span class="muted">(${esc(s.forestType)})</span>` : ''}${s.edge ? ' · margine/radura' : ''}<br>
+    ${esc(s.forest)}${s.edge ? ' · margine/radura' : ''}<br>
     <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C</span><br>
-    ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()} · pioggia 20 gg ${s.rainTotal} mm</span><br>` : ''}
+    ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()}</span><br>` : ''}
     ${s.access ? `<span class="small">${accessText(s.access)}</span><br>` : ''}
-    ${s.lastRainDays != null ? `<span class="small" style="${s.lastRainDays > 20 ? 'color:var(--danger)' : ''}">Ultima pioggia utile: ${s.lastRainDays} giorni fa (${itDate(s.lastRainDate)})${s.lastRainDays > 20 ? ' – troppo vecchia, voto ridotto' : ''}</span><br>` : '<span class="small" style="color:var(--danger)">Nessuna pioggia utile negli ultimi 40 giorni</span><br>'}
+    ${s.lastRainDays != null ? `<span class="small" style="${s.lastRainDays > 20 ? 'color:var(--danger)' : ''}">Ultima pioggia: ${itDate(s.lastRainDate)} (${s.lastRainDays} gg fa)${s.lastRainDays > 20 ? ' – troppo vecchia, voto ridotto' : ''} · ${s.rainTotal} mm in 20 gg</span><br>` : `<span class="small" style="color:var(--danger)">Nessuna pioggia utile negli ultimi 40 giorni · ${s.rainTotal} mm in 20 gg</span><br>`}
     ${s.nearEmpty ? `<span class="small" style="color:var(--warn)">Tua uscita a vuoto a ${s.nearEmpty.m} m il ${itDate(s.nearEmpty.date)}: voto ridotto</span><br>` : ''}
     ${s.wind ? `<span class="muted small">${windText(s.wind)}</span><br>` : ''}
-    ${s.rainSrc ? `<span class="muted small">${rainSrcText(s.rainSrc)}</span><br>` : ''}
     ${scoreBreakdown(s)}
     ${prot}${kill}
     <div class="small muted" style="margin-top:8px">Portami qui con:</div>
@@ -585,7 +584,7 @@ function renderSpots() {
       <div class="score" style="background:${scoreColor(s.score)}">${s.score}</div>
       <div>
         <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.zone ? `<span class="pill zone">Zona ${s.zone}</span> ` : ''}${s.fungaia ? `<span class="pill ok">la tua fungaia · ${s.nPos}×</span>` : s.nearFind ? '<span class="pill ok">vicino a una tua fungaia</span>' : ''}</div>
-        <div class="m">${esc(s.forest)}${s.forestType ? ` (${esc(s.forestType)})` : ''}${s.edge ? ' · margine' : ''} · pendenza ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km</div>
+        <div class="m">${esc(s.forest)}${s.edge ? ' · margine' : ''} · pendenza ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km</div>
         <div class="m">T suolo ${fmt1(s.tLocal)} °C · luogo ${s.place} · tempismo ${s.timing}${s.daysSince != null ? ` · ${s.daysSince} gg da pioggia` : ''}</div>
         ${s.access ? `<div class="m">${accessText(s.access)}</div>` : ''}
         ${s.regime ? `<div class="m">${REGIMES[s.regime].label} · pioggia 20 gg ${s.rainTotal} mm${s.soil ? ` · ${esc(s.soil.label.toLowerCase())} (${s.soil.theta}%)` : ''}</div>` : ''}
