@@ -12,7 +12,7 @@ import { nearestRoad, walkMinutes } from './access.js';
 import { wetness } from './hydro.js';
 import {
   activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore, WIND_NAMES, staleFactor,
-  WEAK_RAIN_FACTOR, microSoil, MICRO_PLACE_MAX,
+  WEAK_RAIN_FACTOR, microSoil, shelterOf,
 } from './engine.js';
 
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
@@ -53,9 +53,9 @@ function colorFor(score, groupKey) {
   return [c1[0] + (c2[0] - c1[0]) * a, c1[1] + (c2[1] - c1[1]) * a, c1[2] + (c2[2] - c1[2]) * a, 70 + 140 * a];
 }
 
-// Riepilogo del microclima per la scheda dello spot (solo se il punto è davvero in zona umida)
-const microInfo = (wet, tm, soilEff) => (wet && wet.m >= 0.2 ? {
-  distM: wet.distM, hand: wet.hand, m: Math.round(wet.m * 100),
+// Riepilogo del microclima per la scheda dello spot (solo quando compensa davvero il suolo secco)
+const microInfo = (wet, tm, soilEff) => (soilEff - tm.soil.factor >= 0.03 ? {
+  water: !!wet && wet.m >= 0.2, distM: wet?.distM ?? null, hand: wet?.hand ?? null,
   rh: tm.air?.rh ?? null, windMean: tm.air?.wind ?? null,
   soilGain: Math.round((soilEff - tm.soil.factor) * 100),
 } : null);
@@ -63,12 +63,9 @@ const microInfo = (wet, tm, soilEff) => (wet && wet.m >= 0.2 ? {
 // Combina luogo, tempismo, stagione e bonus personali
 // Combina luogo (con bonus margini/fungaie, max 1), suolo, timer e stagione: vedi finalScore
 // + pioggia troppo vecchia (oltre 20 giorni, peggio se fa caldo): vedi staleFactor
-// + microclima umido (wet = zona vicina a fossi/impluvi, vedi hydro.js): premio sul luogo e suolo compensato
-const combine = (place, tm, season, bonus, hot, wet) => {
-  const m = wet?.m || 0;
-  return finalScore(Math.min(1, place * bonus * (1 + MICRO_PLACE_MAX * m)), microSoil(tm.soil.factor, m, tm.air?.f), tm.timer, season)
-    * staleFactor(tm.lastRainDays, hot) * (tm.weakRain ? WEAK_RAIN_FACTOR : 1);
-};
+// + microclima (sh = riparo: zona umida o versante Nord, vedi shelterOf): compensa il suolo secco con aria umida e calma
+const combine = (place, tm, season, bonus, hot, sh) => finalScore(Math.min(1, place * bonus), microSoil(tm.soil.factor, sh, tm.air?.f), tm.timer, season)
+  * staleFactor(tm.lastRainDays, hot) * (tm.weakRain ? WEAK_RAIN_FACTOR : 1);
 
 export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], empties = [], onStep = () => {} }) {
   const radius = s.radiusKm;
@@ -205,11 +202,11 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       let bonus = edgeAt(ox, oy);
       bonus *= nearFindBonus(ll);
       bonus *= emptyFactor(ll, tm);
-      const wet = wetMain.at(ll.lat, ll.lon);
+      const sh = shelterOf(wetMain.at(ll.lat, ll.lon).m, aspect, slope);
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime, wind: tm.wind }, ctx, g.key);
-        const fin = combine(pl.score, tm, g.weight, bonus, hot, wet);
+        const fin = combine(pl.score, tm, g.weight, bonus, hot, sh);
         if (!best || fin > best.fin) best = { fin, pl, tm, g };
       }
       img.set(colorFor(best.pl.score * best.g.weight, best.g.key), k * 4);
@@ -234,7 +231,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     let best = null;
     for (const g of groups) {
       const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime, wind: tm.wind }, ctx, g.key);
-      const fin = combine(pl.score, tm, g.weight, bonus, hot, wet);
+      const fin = combine(pl.score, tm, g.weight, bonus, hot, shelterOf(wet?.m, aspect, slope));
       if (!best || fin > best.fin) best = { fin, pl, tm, g };
     }
     return { fk, wet, ...best };
@@ -382,17 +379,18 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
       const edge = c.patch && c.patch.frac > 0.3 && c.patch.frac < 0.85 ? 1.08 : 1;
       const wet = c.wet || wetMain.at(c.lat, c.lon);
+      const sh = shelterOf(wet.m, c.aspect, c.slope);
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation: c.elevation, slope: c.slope, aspect: c.aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
         let bonus = edge;
         bonus *= nearFindBonus(c);
         bonus *= emptyFactor(c, tm);
-        const fin = combine(pl.score, tm, g.weight, bonus, hot, wet);
+        const fin = combine(pl.score, tm, g.weight, bonus, hot, sh);
         if (!best || fin > best.fin) best = { fin, pl, g, bonus };
       }
-      const luogo = Math.min(1, best.pl.score * best.bonus * (1 + MICRO_PLACE_MAX * wet.m));
-      const soilEff = microSoil(tm.soil.factor, wet.m, tm.air?.f);
+      const luogo = Math.min(1, best.pl.score * best.bonus);
+      const soilEff = microSoil(tm.soil.factor, sh, tm.air?.f);
       return {
         lat: c.lat, lon: c.lon,
         elevation: Math.round(c.elevation), slope: Math.round(c.slope), aspect: Math.round(c.aspect),
@@ -407,7 +405,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
           suolo: Math.round(soilEff * 100),
           timer: Math.round(tm.timer * 100),
           stagione: Math.round(best.g.weight * 100),
-          bonus: Math.round((best.bonus * (1 + MICRO_PLACE_MAX * wet.m) - 1) * 100),
+          bonus: Math.round((best.bonus - 1) * 100),
         },
         micro: microInfo(wet, tm, soilEff),
         fk,
@@ -487,11 +485,12 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
       const fBonus = nearFindBonus(place) * emptyFactor(place, tm);
       const fWet = wetMain.at(place.lat, place.lon);
-      const fSoil = microSoil(tm.soil.factor, fWet.m, tm.air?.f);
+      const fSh = shelterOf(fWet.m, aspect, slope);
+      const fSoil = microSoil(tm.soil.factor, fSh, tm.air?.f);
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
-        const fin = combine(pl.score, tm, g.weight, fBonus, hot, fWet);
+        const fin = combine(pl.score, tm, g.weight, fBonus, hot, fSh);
         if (!best || fin > best.fin) best = { fin, pl, g };
       }
       const sm = placeSummary(place);
@@ -504,8 +503,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         score: Math.round(best.fin * 100),
         soil: { theta: Math.round(tm.soil.theta * 100), cls: tm.soil.cls, label: tm.soil.label },
         parts: {
-          luogo: Math.round(Math.min(1, best.pl.score * fBonus * (1 + MICRO_PLACE_MAX * fWet.m)) * 100), suolo: Math.round(fSoil * 100),
-          timer: Math.round(tm.timer * 100), stagione: Math.round(best.g.weight * 100), bonus: Math.round((fBonus * (1 + MICRO_PLACE_MAX * fWet.m) - 1) * 100),
+          luogo: Math.round(Math.min(1, best.pl.score * fBonus) * 100), suolo: Math.round(fSoil * 100),
+          timer: Math.round(tm.timer * 100), stagione: Math.round(best.g.weight * 100), bonus: Math.round((fBonus - 1) * 100),
         },
         fk, place: Math.round(best.pl.score * 100), timing: Math.round(tm.timer * 100),
         tLocal: Math.round(best.pl.tLocal * 10) / 10,

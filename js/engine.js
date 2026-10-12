@@ -281,12 +281,18 @@ export function airMoisture(days, idx, n = 7) {
   const f = rampE(rh, 60, 75) * (wind == null ? 1 : 1 - rampE(wind, 8, 15));
   return { rh: Math.round(rh), wind: wind == null ? null : Math.round(wind), f };
 }
-// Suolo con microclima: in una zona umida (wetM 0–1) con aria umida e calma (airF 0–1) si recupera
-// fino a metà del suolo che manca (suolo 30 -> 65 in un fondovalle umido con aria all'85% senza vento)
+// Riparo che trattiene l'umidità (0–1): zona umida vicino a fossi/impluvi OPPURE versante Nord–NE inclinato.
+// I ritrovamenti dell'utente sono tutti su versanti Nord–Est lontani dai fossi (117–690 m, 30–213 m sopra):
+// niente premio fisso al fondovalle, il microclima conta solo come compensazione del suolo secco.
+export function shelterOf(wetM, aspect, slope) {
+  const north = Math.max(0, Math.min(1, (Math.cos((aspect * Math.PI) / 180) + 0.6) / 1.3)) * rampE(slope, 4, 12);
+  return Math.max(wetM || 0, north);
+}
+// Suolo con microclima: con riparo (0–1) e aria umida e calma (airF 0–1) si recupera fino a metà del suolo
+// che manca (suolo 30 -> 65 con aria all'85% senza vento). Con il suolo già bagnato non cambia niente.
 export const MICRO_SOIL_MAX = 0.5;
-export const MICRO_PLACE_MAX = 0.05; // vicino all'acqua: fino a +5% sul luogo in ogni periodo (con +10% due spot su tre finivano nei fossi)
-export function microSoil(soilF, wetM, airF) {
-  return soilF + (1 - soilF) * MICRO_SOIL_MAX * (wetM || 0) * (airF || 0);
+export function microSoil(soilF, shelter, airF) {
+  return soilF + (1 - soilF) * MICRO_SOIL_MAX * (shelter || 0) * (airF || 0);
 }
 
 // ---------- Pioggia troppo vecchia ----------

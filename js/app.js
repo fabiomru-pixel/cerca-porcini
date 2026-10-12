@@ -223,9 +223,9 @@ function accessText(acc) {
 }
 // Microclima umido vicino a fossi e impluvi
 function microText(m) {
-  const where = m.distM < 30 ? 'sul fosso' : `fosso a ${m.distM} m${m.hand ? ` (+${m.hand} m)` : ''}`;
+  const where = !m.water ? 'versante riparato' : m.distM < 30 ? 'sul fosso' : `fosso a ${m.distM} m${m.hand ? ` (+${m.hand} m)` : ''}`;
   const air = m.rh != null ? ` · aria ${m.rh}%${m.windMean != null ? `, vento ${m.windMean} km/h` : ''}` : '';
-  return `Microclima umido: ${where}${air}${m.soilGain >= 3 ? ` · suolo +${m.soilGain}` : ''}`;
+  return `Microclima umido: ${where}${air} · suolo +${m.soilGain}`;
 }
 // Vento forte dopo la pioggia e penalità del versante
 function windText(w) {
