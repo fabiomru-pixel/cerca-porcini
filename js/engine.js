@@ -143,7 +143,7 @@ export function evalPlace(cell, ctx, groupKey) {
   else if (cell.elevation > f.altMax) band = Math.max(0.35, 1 - (cell.elevation - f.altMax) / 400);
 
   // Pendenza ed esposizione secondo la situazione (A secco/caldo, B umido/fresco, C intermedia)
-  const slopeS = slopeFactor(cell.slope, cell.regime || 'C');
+  const slopeS = slopeFactor(cell.slope, cell.regime || 'C', cell.aspect);
   // + quanto hai imparato sul campo: tasso di successo per versante nella stessa situazione
   const learnedExpo = ctx.learn?.expo?.[cell.regime || 'C']?.[Math.round(cell.aspect / 45) % 8] || 0;
   const expoPref = 1 + (expoBonus(cell.aspect, cell.regime || 'C') + learnedExpo) * expoFactor;
@@ -151,7 +151,7 @@ export function evalPlace(cell, ctx, groupKey) {
   // la quota nasce dal calcolo termico: la fascia tipica del bosco è solo un indizio (peso ridotto).
   // Pendenza ed esposizione sono riportate a 0–1 dividendo per il loro massimo nella situazione:
   // il "luogo" vale 1 solo se temperatura, fascia, pendenza ed esposizione sono tutte ideali.
-  const terrainMax = cell.regime === 'A' || cell.regime === 'B' ? 1.15 * 1.25 : 1;
+  const terrainMax = cell.regime === 'A' || cell.regime === 'B' ? 1.15 * 1.25 : 1.15;
   // vento dopo la pioggia: i versanti colpiti si asciugano (tramontana -> esposti a N, ecc.)
   const windF = windFactor(cell.aspect, cell.slope, cell.wind);
   const score = clamp(((thermal * (0.75 + 0.25 * band) * slopeS * expoPref) / terrainMax) * windF, 0, 1);
@@ -170,13 +170,21 @@ const piecewise = (x, pts) => {
   return pts[pts.length - 1][1];
 };
 
-// A: piano/falsopiano 0–8° al massimo, ripido molto penalizzato
+// A: piano/falsopiano 0–8° al massimo, ripido penalizzato
 // B: pendenza media 10–25° al massimo, piano e ripido un po' penalizzati
-// C: come prima, pianori premiati e ripido penalizzato
-export function slopeFactor(slope, regime) {
-  if (regime === 'A') return piecewise(slope, [[8, 1.15], [15, 1.0], [30, 0.6]]);
+// C: pianori leggermente preferiti, ripido poco penalizzato
+// Versanti Nord–NE (A e C): più sono ripidi, meno sole prendono e più restano freschi e umidi.
+// Ritrovamenti dell'utente (set–ott 2026): tutti tra NO ed E, pendenza media 17° (8–25°), nessuno sotto
+// gli 8° tranne uno; uscite a vuoto su Nord quasi piani. Lì niente penalità fino a 30°, premio 12–22°.
+const SLOPE_NORTH = [[0, 1.0], [8, 1.05], [12, 1.15], [22, 1.15], [30, 1.0], [40, 0.6]];
+export function slopeFactor(slope, regime, aspect = 180) {
   if (regime === 'B') return piecewise(slope, [[5, 0.85], [10, 1.15], [25, 1.15], [35, 0.7]]);
-  return piecewise(slope, [[8, 1], [35, 0.2]]);
+  const other = regime === 'A'
+    ? piecewise(slope, [[8, 1.15], [15, 1.0], [30, 0.6]])
+    : piecewise(slope, [[8, 1], [25, 0.85], [35, 0.6]]);
+  // quanto il versante guarda a Nord: 1 da NO a NE, ~0,45 a Est/Ovest, 0 da SE a SO; in piano conta poco
+  const north = clamp((Math.cos((aspect * Math.PI) / 180) + 0.6) / 1.3, 0, 1) * clamp(slope / 12, 0, 1);
+  return north * piecewise(slope, SLOPE_NORTH) + (1 - north) * other;
 }
 
 // Bonus esposizione: pieno nelle due direzioni ideali, metà in quelle accanto, malus sul lato opposto

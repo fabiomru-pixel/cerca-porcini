@@ -91,7 +91,7 @@ export function regimeOf(rainTotal, tc) {
 }
 
 export const REGIMES = {
-  A: { label: 'Secco o caldo', hint: 'premio versanti Nord–Nord-Est su terreno piano o in falsopiano' },
+  A: { label: 'Secco o caldo', hint: 'premio versanti Nord–Nord-Est, in piano o con pendenza fino a 25°' },
   B: { label: 'Umido e fresco', hint: 'premio versanti Sud–Sud-Est con pendenza media (10–25°)' },
-  C: { label: 'Intermedia', hint: 'nessuna esposizione privilegiata, pianori preferiti' },
+  C: { label: 'Intermedia', hint: 'nessuna esposizione privilegiata; pendenza poco penalizzata (nulla sui versanti Nord)' },
 };
