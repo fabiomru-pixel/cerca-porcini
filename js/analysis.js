@@ -442,52 +442,6 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   }
   for (const sp of final) { delete sp._w; }
 
-  // Zone: partendo dallo spot migliore, gli spot entro 1,5 km da lui (quindi mai più di 3 km tra due spot)
-  // e senza una valle profonda in mezzo: il fondovalle allunga molto il giro reale
-  const valleyBetween = (a, b) => {
-    const low = Math.min(a.elevation, b.elevation);
-    for (let t = 0.1; t < 1; t += 0.1) {
-      const e = mosaic.elevation(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t);
-      if (Number.isFinite(e) && e > -500 && low - e > 150) return true; // si scende più di 150 m sotto lo spot più basso
-    }
-    return false;
-  };
-  const zoneOf = new Map();
-  let zi = 0;
-  for (const sp of final) { // final è già ordinato dal migliore
-    if (zoneOf.has(sp.id)) continue;
-    zoneOf.set(sp.id, zi);
-    for (const o of final) if (!zoneOf.has(o.id) && distKm(sp, o) <= 1.5 && !valleyBetween(sp, o)) zoneOf.set(o.id, zi);
-    zi++;
-  }
-  const zones = [];
-  for (let z = 0; z < zi; z++) {
-    const ms = final.filter((sp) => zoneOf.get(sp.id) === z).sort((a, b) => b.score - a.score);
-    if (ms.length < 2) continue;
-    // giro: dal migliore, sempre verso lo spot più vicino non ancora visto
-    const order = [ms[0]], rest = ms.slice(1);
-    let km = 0;
-    while (rest.length) {
-      const last = order[order.length - 1];
-      rest.sort((a, b) => distKm(last, a) - distKm(last, b));
-      km += distKm(last, rest[0]); order.push(rest.shift());
-    }
-    // parcheggio: la strada dello spot più vicino a una strada (il giro parte e torna lì)
-    const withRoad = ms.filter((sp) => sp.access).sort((a, b) => a.access.walkMin - b.access.walkMin);
-    zones.push({
-      parking: withRoad.length ? { ...withRoad[0].access.road, walkMin: withRoad[0].access.walkMin, spot: withRoad[0].id } : null,
-      spots: order.map((sp) => sp.id), count: ms.length, best: ms[0].score,
-      mean: Math.round(ms.reduce((a, sp) => a + sp.score, 0) / ms.length),
-      tourKm: Math.round(km * 10) / 10,
-      lat: ms.reduce((a, sp) => a + sp.lat, 0) / ms.length, lon: ms.reduce((a, sp) => a + sp.lon, 0) / ms.length,
-    });
-  }
-  // ordine: zone con spot migliori e più numerosi prima
-  zones.sort((a, b) => (b.best + b.mean * 0.5 + b.count * 3) - (a.best + a.mean * 0.5 + a.count * 3));
-  zones.forEach((z, i) => {
-    z.id = String.fromCharCode(65 + (i % 26));
-    for (const sid of z.spots) { const sp = final.find((x) => x.id === sid); sp.zone = z.id; }
-  });
 
   // Le tue fungaie nel raggio: sempre valutate nel punto esatto, con il timer imparato da ciascuna
   onStep('Valuto le tue fungaie…', 0.94);
@@ -545,6 +499,67 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     } catch (e) { console.warn('fungaia', place.id, e); }
   }
   fungaie.sort((a, b) => b.score - a.score).forEach((f, i) => { f.id = `F${String(i + 1).padStart(2, '0')}`; });
+
+  // Zone: partendo dallo spot migliore, gli spot entro 1,5 km da lui (quindi mai più di 3 km tra due spot)
+  // e senza una valle profonda in mezzo: il fondovalle allunga molto il giro reale.
+  // Le tue fungaie vicine agli spot della zona entrano nel giro.
+  const valleyBetween = (a, b) => {
+    const low = Math.min(a.elevation, b.elevation);
+    for (let t = 0.1; t < 1; t += 0.1) {
+      const e = mosaic.elevation(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t);
+      if (Number.isFinite(e) && e > -500 && low - e > 150) return true; // si scende più di 150 m sotto lo spot più basso
+    }
+    return false;
+  };
+  const zoneOf = new Map();
+  let zi = 0;
+  for (const sp of final) { // final è già ordinato dal migliore
+    if (zoneOf.has(sp.id)) continue;
+    zoneOf.set(sp.id, zi);
+    for (const o of final) if (!zoneOf.has(o.id) && distKm(sp, o) <= 1.5 && !valleyBetween(sp, o)) zoneOf.set(o.id, zi);
+    zi++;
+  }
+  // fungaie: nella zona dello spot più vicino, se entro 800 m da uno spot e 1,5 km dal migliore, senza valle in mezzo
+  for (const fg of fungaie) {
+    let bestSp = null;
+    for (const sp of final) if (!bestSp || distKm(fg, sp) < distKm(fg, bestSp)) bestSp = sp;
+    if (!bestSp || distKm(fg, bestSp) > 0.8 || valleyBetween(fg, bestSp)) continue;
+    const z = zoneOf.get(bestSp.id);
+    const head = final.find((sp) => zoneOf.get(sp.id) === z);
+    if (distKm(fg, head) <= 1.5) zoneOf.set(fg.id, z);
+  }
+  const zones = [];
+  for (let z = 0; z < zi; z++) {
+    const ms = final.filter((sp) => zoneOf.get(sp.id) === z).sort((a, b) => b.score - a.score);
+    const fs = fungaie.filter((fg) => zoneOf.get(fg.id) === z);
+    const all = [...ms, ...fs];
+    if (all.length < 2) continue;
+    // partenza: lo spot più vicino alla strada; il giro va sempre al punto più vicino non ancora visto e torna lì
+    const withRoad = ms.filter((sp) => sp.access).sort((a, b) => a.access.walkMin - b.access.walkMin);
+    const first = withRoad[0] || ms[0];
+    const order = [first], rest = all.filter((p) => p !== first);
+    let km = 0;
+    while (rest.length) {
+      const last = order[order.length - 1];
+      rest.sort((a, b) => distKm(last, a) - distKm(last, b));
+      km += distKm(last, rest[0]); order.push(rest.shift());
+    }
+    km += distKm(order[order.length - 1], first); // ritorno allo spot di partenza
+    zones.push({
+      parking: withRoad.length ? { ...withRoad[0].access.road, walkMin: withRoad[0].access.walkMin, spot: withRoad[0].id } : null,
+      spots: order.map((p) => p.id), count: ms.length, fungaie: fs.length, best: ms[0].score,
+      mean: Math.round(ms.reduce((a, sp) => a + sp.score, 0) / ms.length),
+      tourKm: Math.round(km * 10) / 10,
+      lat: all.reduce((a, p) => a + p.lat, 0) / all.length, lon: all.reduce((a, p) => a + p.lon, 0) / all.length,
+    });
+  }
+  // ordine: zone con spot migliori e più numerosi prima (una tua fungaia conta come uno spot in più)
+  const zrank = (z) => z.best + z.mean * 0.5 + (z.count + z.fungaie) * 3;
+  zones.sort((a, b) => zrank(b) - zrank(a));
+  zones.forEach((z, i) => {
+    z.id = String.fromCharCode(65 + (i % 26));
+    for (const pid of z.spots) { const p = final.find((x) => x.id === pid) || fungaie.find((x) => x.id === pid); p.zone = z.id; }
+  });
 
   onStep('Disegno le curve della fascia di quota…', 0.96);
   const inRadius = (la, lo) => distKm(center, { lat: la, lon: lo }) <= radius;

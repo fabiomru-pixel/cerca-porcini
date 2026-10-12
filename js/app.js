@@ -253,7 +253,7 @@ function spotPopup(s) {
     ? `<div class="alert ${s.protected.strict ? 'bad' : 'warn'}" style="margin:8px 0 0">${s.protected.strict ? 'Riserva a protezione integrale: raccolta quasi certamente vietata.' : 'Area protetta: verifica il regolamento prima di raccogliere.'}<br><b>${esc(s.protected.name)}</b></div>` : '';
   const kill = s.killers.length ? `<div class="alert warn" style="margin:8px 0 0">Timer fermato da: ${s.killers.join(', ')}</div>` : '';
   const z = s.zone ? (state.analysis?.zones || []).find((x) => x.id === s.zone) : null;
-  const zoneTxt = z ? `<div class="small" style="margin:2px 0 4px"><span class="pill zone">Zona ${z.id}</span> ${z.count} spot entro 2 km · giro ~${fmt1(z.tourKm)} km in linea d'aria: ${z.spots.join(' → ')}
+  const zoneTxt = z ? `<div class="small" style="margin:2px 0 4px"><span class="pill zone">Zona ${z.id}</span> ${zoneCountTxt(z)} · giro ad anello ~${fmt1(z.tourKm)} km in linea d'aria: ${z.spots.join(' → ')} → ${z.spots[0]}
     <a class="btn small block" style="margin-top:6px" target="_blank" rel="noopener" href="${zoneTourUrl(z, state.analysis)}">${icon('nav')} Giro della zona su Mapy.com</a></div>` : '';
   const fung = s.fungaia ? `<div class="small" style="margin:2px 0 4px"><span class="pill ok">La tua fungaia</span> ${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}<br>
     <span class="muted">Timer di questa fungaia: ideale ${s.idealDays} giorni dopo la pioggia${s.daysSince != null ? ` · oggi ${s.daysSince} gg dalla pioggia` : ''}</span></div>` : '';
@@ -389,16 +389,15 @@ async function run() {
 
 // Link Mapy.com del giro a piedi: dall'auto (andata e ritorno) o dalla tua posizione, tappe negli spot in ordine
 // formato: /fnc/v1/route?start=lon,lat&end=lon,lat&waypoints=lon,lat;lon,lat (max 15 tappe intermedie)
+// punti di una zona: spot (P..) e fungaie (F..)
+const zonePts = (z, a) => z.spots.map((id) => a.spots.find((sp) => sp.id === id) || (a.fungaie || []).find((f) => f.id === id)).filter(Boolean);
+const zoneCountTxt = (z) => `${z.count} spot${z.fungaie ? ` + ${z.fungaie} tu${z.fungaie === 1 ? 'a fungaia' : 'e fungaie'}` : ''} entro 2 km`;
+// Giro ad anello: parte e torna allo spot più vicino alla strada (il primo della zona), dove arrivi in auto
 function zoneTourUrl(z, a) {
-  const pts = z.spots.map((id) => a.spots.find((sp) => sp.id === id)).filter(Boolean);
+  const pts = zonePts(z, a);
   if (!pts.length) return null;
   const ll = (p) => `${p.lon.toFixed(6)},${p.lat.toFixed(6)}`;
-  const near = (x, km) => x && pts.some((p) => distKm(x, p) <= km);
-  let start, end, via;
-  if (near(state.car, 5)) { start = state.car; end = state.car; via = pts; }                // anello dall'auto parcheggiata vicino
-  else if (near(state.gps, 3)) { start = state.gps; end = pts[pts.length - 1]; via = pts.slice(0, -1); } // sei già sul posto
-  else if (z.parking) { start = z.parking; end = z.parking; via = pts; }                    // anello dal parcheggio sulla strada
-  else { start = pts[0]; end = pts[pts.length - 1]; via = pts.slice(1, -1); }              // dal primo all'ultimo spot
+  const start = pts[0], end = pts[0], via = pts.slice(1);
   const p = new URLSearchParams({ mapset: 'outdoor', routeType: 'foot_hiking', start: ll(start), end: ll(end) });
   if (via.length) p.set('waypoints', via.slice(0, 15).map(ll).join(';'));
   return `https://mapy.com/fnc/v1/route?${p.toString().replace(/%2C/g, ',').replace(/%3B/g, ';')}`;
@@ -410,17 +409,14 @@ function zonesCard(a) {
   if (!zs.length) return a.scan ? '<p class="small muted">Nessuna zona con più spot entro 2 km: gli spot migliori sono sparsi.</p>' : '';
   return `<h3>Zone migliori per un giro</h3>
     ${zs.map((z) => {
-      const first = a.spots.find((sp) => sp.id === z.spots[0]);
-      const pts = z.spots.map((id) => a.spots.find((sp) => sp.id === id)).filter(Boolean);
-      const startTxt = state.car && pts.some((p) => distKm(state.car, p) <= 5) ? 'ad anello dalla tua auto'
-        : state.gps && pts.some((p) => distKm(state.gps, p) <= 3) ? 'dalla tua posizione'
-        : z.parking ? `ad anello dal parcheggio sulla strada (~${z.parking.walkMin} min a piedi fino a ${z.parking.spot})` : `da ${z.spots[0]} a ${z.spots[z.spots.length - 1]}`;
+      const first = zonePts(z, a)[0];
+      const startTxt = `ad anello da ${z.spots[0]}${z.parking ? `, lo spot più vicino alla strada (~${z.parking.walkMin} min a piedi)` : ''}`;
       const driveTo = z.parking || first;
       return `<div class="card click zone-card" data-zone="${z.id}">
-      <div class="row"><span class="pill zone">Zona ${z.id}</span><b class="grow">${z.count} spot · migliore ${z.best} · media ${z.mean}</b></div>
-      <div class="small muted" style="margin-top:4px">Giro: ${z.spots.join(' → ')} · ~${fmt1(z.tourKm)} km in linea d'aria tra gli spot</div>
+      <div class="row"><span class="pill zone">Zona ${z.id}</span><b class="grow">${z.count} spot${z.fungaie ? ` + ${z.fungaie} fungai${z.fungaie === 1 ? 'a' : 'e'}` : ''} · migliore ${z.best} · media ${z.mean}</b></div>
+      <div class="small muted" style="margin-top:4px">Giro: ${z.spots.join(' → ')} → ${z.spots[0]} · ~${fmt1(z.tourKm)} km in linea d'aria</div>
       <a class="btn primary block" style="margin-top:8px" target="_blank" rel="noopener" data-stop href="${zoneTourUrl(z, a)}">${icon('nav')} Giro a piedi su Mapy.com</a>
-      <div class="small muted" style="margin-top:4px">Percorso su sentieri ${startTxt}, tappe ${z.spots.join(', ')}. In auto fino ${z.parking ? 'al parcheggio' : `al primo spot (${z.spots[0]})`}:</div>
+      <div class="small muted" style="margin-top:4px">Percorso su sentieri ${startTxt}, tappe ${z.spots.join(', ')}. In auto fino ${z.parking ? `alla strada più vicina a ${z.spots[0]}` : `a ${z.spots[0]}`}:</div>
       <div data-stop>${driveTo ? navButtons(driveTo.lat, driveTo.lon, { small: true }) : ''}</div>
     </div>`;
     }).join('')}`;
@@ -562,7 +558,7 @@ function renderResults() {
   $$('.zone-card [data-stop]').forEach((x) => x.addEventListener('click', (e) => e.stopPropagation()));
   $$('.zone-card').forEach((c) => c.onclick = () => {
     const z = a.zones.find((x) => x.id === c.dataset.zone);
-    const pts = z.spots.map((id) => a.spots.find((sp) => sp.id === id)).filter(Boolean).map((sp) => [sp.lat, sp.lon]);
+    const pts = zonePts(z, a).map((p) => [p.lat, p.lon]);
     map.fitBounds(pts, { padding: [70, 70], maxZoom: 15 });
     if (innerWidth < 900) setSheet('peek');
   });
