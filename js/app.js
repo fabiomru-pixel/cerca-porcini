@@ -227,7 +227,6 @@ function windText(w) {
   const list = w.winds.slice(0, 2).map((x) => `${x.name} ${x.days} g (max ${x.max} km/h)`).join(', ');
   return `Vento dopo la pioggia: ${list}${w.penalty >= 3 ? ` → versante penalizzato −${w.penalty}%` : ' → versante poco esposto'}`;
 }
-const windyUrl = (lat, lon) => `https://www.windy.com/${lat.toFixed(4)}/${lon.toFixed(4)}?wind,${lat.toFixed(4)},${lon.toFixed(4)},12`;
 
 // Da dove arriva la pioggia dei giorni passati
 function rainSrcText(src) {
@@ -271,7 +270,6 @@ function spotPopup(s) {
     ${prot}${kill}
     <div class="small muted" style="margin-top:8px">Portami qui con:</div>
     ${navButtons(s.lat, s.lon, { small: true })}
-    <a class="btn small block" style="margin-top:6px" target="_blank" rel="noopener" href="${windyUrl(s.lat, s.lon)}">Vento e meteo su Windy</a>
     ${s.fungaia ? `<button class="btn small block" style="margin-top:6px" data-open-place="${s.placeId}">Apri la scheda della fungaia</button>` : ''}`;
 }
 
