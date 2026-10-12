@@ -11,6 +11,7 @@ import { loadGauges, applyGauges } from './gauges.js';
 import { nearestRoad, walkMinutes } from './access.js';
 import {
   activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore, WIND_NAMES, staleFactor,
+  WEAK_RAIN_FACTOR,
 } from './engine.js';
 
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
@@ -54,7 +55,8 @@ function colorFor(score, groupKey) {
 // Combina luogo, tempismo, stagione e bonus personali
 // Combina luogo (con bonus margini/fungaie, max 1), suolo, timer e stagione: vedi finalScore
 // + pioggia troppo vecchia (oltre 20 giorni, peggio se fa caldo): vedi staleFactor
-const combine = (place, tm, season, bonus, hot) => finalScore(Math.min(1, place * bonus), tm.soil.factor, tm.timer, season) * staleFactor(tm.lastRainDays, hot);
+const combine = (place, tm, season, bonus, hot) => finalScore(Math.min(1, place * bonus), tm.soil.factor, tm.timer, season)
+  * staleFactor(tm.lastRainDays, hot) * (tm.weakRain ? WEAK_RAIN_FACTOR : 1);
 
 export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], empties = [], onStep = () => {} }) {
   const radius = s.radiusKm;

@@ -459,7 +459,7 @@ async function saveToHistory(a) {
   const light = {
     id: a.createdAt, createdAt: a.createdAt, date: a.date, center: a.center, radius: a.radius, valleyElev: a.valleyElev,
     settings: { ...a.settings, aspectPref: state.settings.aspectPref, maxWalkMin: state.settings.maxWalkMin, species: state.settings.species },
-    summary: { meanT: a.summary.meanT, meanMax: a.summary.meanMax, meanMin: a.summary.meanMin, rainTotal: a.summary.rainTotal, soilTheta: a.summary.soilTheta, lastEpisode: a.summary.lastEpisode },
+    summary: { meanT: a.summary.meanT, meanMax: a.summary.meanMax, meanMin: a.summary.meanMin, rainTotal: a.summary.rainTotal, soilTheta: a.summary.soilTheta, lastEpisode: a.summary.lastEpisode, timerEpisode: a.summary.timerEpisode },
     clim: a.clim, tc: a.tc, timers: a.timers, scan: a.scan,
     groups: a.groups.map((g) => ({ key: g.key, species: g.species, band: g.band })),
     spots: a.spots, fungaie: a.fungaie || [], zones: a.zones || [],
@@ -479,7 +479,7 @@ function renderResults() {
   const s = a.summary;
   const maxRain = Math.max(5, ...s.rainSeries.map((r) => r.rain));
   const bars = s.rainSeries.map((r) => `<i title="${r.date}: ${fmt1(r.rain)} mm" style="height:${Math.max(2, (r.rain / maxRain) * 100)}%"></i>`).join('');
-  const last = s.lastEpisode;
+  const last = s.timerEpisode || s.lastEpisode;
   const age = Math.round((Date.now() - new Date(a.createdAt)) / 36e5);
   const groups = a.groups.map((g) => {
     const G = GROUPS[g.key];
@@ -496,7 +496,7 @@ function renderResults() {
     const status = a.date < t.firstPossible ? 'in attesa' : a.date < t.from ? 'micelio in attivazione' : a.date <= t.to ? '<span class="pill ok">finestra migliore</span>' : 'finestra in chiusura';
     return `<div style="margin-bottom:6px"><b>${FORESTS[fk].label}</b> · ${status}<br>Migliore: <b>${itDate(t.from)} → ${itDate(t.to)}</b> <span class="muted">(primi funghi dal ${itDate(t.firstPossible)}${t.where ? `, pioggia caduta nella zona di ${t.where}` : ', pioggia in valle'})</span></div>`;
   };
-  const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}<div class="muted">Il timer parte dall’ultima pioggia sopra ${state.settings.rainEventMm} mm; ogni spot usa la pioggia caduta nella sua zona.</div></div>`;
+  const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}<div class="muted">Il timer parte dalla pioggia più vecchia degli ultimi 20 giorni che arriva a 15 mm (sommando i giorni di pioggia consecutivi) e non riparte con le piogge successive. Tra ${state.settings.rainEventMm} e 15 mm il timer parte comunque, con voto −20%. Ogni spot usa la pioggia caduta nella sua zona.</div></div>`;
   const alerts = [];
   {
     const all = [...a.spots, ...(a.fungaie || [])];
@@ -535,7 +535,7 @@ function renderResults() {
     <div class="card small" style="margin-top:8px">
       Pioggia giornaliera ultimi 20 giorni (valle)
       <div class="rainbars">${bars}</div>
-      <div style="margin-top:6px">${last ? `Ultima pioggia utile: <b>${itDate(last.end)}</b> (${fmt1(last.total)} mm) · <b>${last.daysSince} giorni</b> fa rispetto al giorno scelto` : 'Nessun episodio di pioggia sopra soglia.'}</div>
+      <div style="margin-top:6px">${last ? `Pioggia del timer: <b>${itDate(last.end)}</b> (${fmt1(last.total)} mm${last.weak ? ', sotto i 15 mm: voto −20%' : ''}) · <b>${last.daysSince} giorni</b> fa rispetto al giorno scelto` : 'Nessun episodio di pioggia sopra soglia.'}</div>
       <div class="muted">Quota di partenza: ${a.valleyElev} m · gradiente ${a.settings.gradient.toFixed(2).replace('.', ',')} °C/100 m</div>
     </div>
     ${alerts.join('')}

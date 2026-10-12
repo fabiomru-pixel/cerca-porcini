@@ -1,14 +1,14 @@
 // Regole di base (dalle slide) e parametri predefiniti.
 // Tutto ciò che è "regolabile" finisce nelle impostazioni utente (db 'settings').
 
-export const APP_VERSION = '1.14.0';
+export const APP_VERSION = '1.15.0';
 
 export const DEFAULT_SETTINGS = {
   gradient: 0.6,          // °C ogni 100 m (regolabile 0,6–0,7)
   windowDays: 7,          // giorni per la media di massime/minime (1–20)
   rainWindowDays: 20,     // finestra per la pioggia cumulata
   rainMinMm: 30,          // pioggia minima nei 20 giorni precedenti
-  rainEventMm: 10,       // un giorno con almeno questi mm avvia/riavvia il timer
+  rainEventMm: 10,       // pioggia minima che avvia un timer (sotto i 15 mm con voto −20%, vedi timerRain)
   radiusKm: 50,           // 5–200 km (barra)
   species: 'auto',        // auto | aestivalis | aereus | edulis | pinophilus
   aspectPref: 'auto',     // auto | N | NE | E | SE | S | SO | O | NO

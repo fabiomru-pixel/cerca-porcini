@@ -58,6 +58,23 @@ export function rainEpisodes(days, fromIdx, toIdx, minMm) {
   return eps.filter((e) => e.total >= minMm);
 }
 
+// Pioggia che avvia il timer (regola dell'utente, ottobre 2026): negli ultimi 20 giorni conta la pioggia
+// più VECCHIA che, sommando i giorni di pioggia consecutivi, arriva ad almeno 15 mm; il timer parte il giorno
+// in cui la somma tocca i 15 mm. Le piogge successive non lo fanno ripartire.
+// Se nessun episodio arriva a 15 mm: il più vecchio da almeno minMm (10) avvia comunque il timer, con −20% sul voto.
+export const RAIN_FULL_MM = 15;
+export const WEAK_RAIN_FACTOR = 0.8;
+export function timerRain(days, fromIdx, toIdx, minMm) {
+  const eps = rainEpisodes(days, fromIdx, toIdx, minMm);
+  for (const e of eps) {
+    if (e.total < RAIN_FULL_MM) continue;
+    let c = 0, k = e.startIdx;
+    for (; k <= e.endIdx; k++) { c += days[k].rain ?? 0; if (c >= RAIN_FULL_MM) break; }
+    return { ...e, timerIdx: Math.min(k, e.endIdx), weak: false };
+  }
+  return eps.length ? { ...eps[0], timerIdx: eps[0].endIdx, weak: true } : null;
+}
+
 export function summarize(days, dateStr, s) {
   const idx = days.findIndex((d) => d.date === dateStr);
   if (idx < 0) throw new Error('Data fuori dall’intervallo meteo disponibile (max 15 giorni avanti)');
@@ -71,9 +88,11 @@ export function summarize(days, dateStr, s) {
   const eps = rainEpisodes(days, rainFrom, idx, s.rainEventMm).map((e) => ({
     start: days[e.startIdx].date, end: days[e.endIdx].date, total: e.total, daysSince: idx - e.endIdx,
   }));
+  const tr = timerRain(days, rainFrom, idx, s.rainEventMm);
   return {
     idx, date: dateStr, meanMax, meanMin, meanT: (meanMax + meanMin) / 2,
     rainTotal, rainOk: rainTotal >= s.rainMinMm, episodes: eps,
+    timerEpisode: tr ? { start: days[tr.startIdx].date, end: days[tr.timerIdx].date, total: tr.total, weak: tr.weak, daysSince: idx - tr.timerIdx } : null,
     soilTheta: soilMoisture(days, idx),
     lastEpisode: eps[eps.length - 1] || null,
     rainSeries: rainDays.map((d) => ({ date: d.date, rain: d.rain ?? 0 })),
@@ -215,12 +234,13 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   const t = forestTimer(forestKey, learn);
   const dT = cellElev != null && wp.elevation != null ? ((cellElev - wp.elevation) * s.gradient) / 100 : 0;
 
-  let best = { score: 0.05, daysSince: null, killers: [] };
-  for (const e of eps) {
-    const daysSince = idx - e.endIdx;
+  let best = { score: 0.05, daysSince: null, killers: [], weak: false };
+  const tr = timerRain(days, from, idx, s.rainEventMm);
+  if (tr) {
+    const daysSince = idx - tr.timerIdx;
     let sc = timerScore(daysSince, t);
     const killers = [];
-    for (let i = e.endIdx + 1; i <= idx; i++) {
+    for (let i = tr.timerIdx + 1; i <= idx; i++) {
       const d = days[i];
       if (!d) continue;
       if (d.tmin - dT <= KILLERS.frostC && !killers.includes('gelo')) killers.push('gelo');
@@ -228,7 +248,7 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
       // il vento non ferma più il timer di tutta la zona: penalizza i versanti che colpisce (vedi windLoads)
     }
     sc *= Math.pow(0.4, killers.length);
-    if (sc > best.score) best = { score: sc, daysSince, killers, total: e.total, endIdx: e.endIdx };
+    best = { score: Math.max(0.05, sc), daysSince, killers, total: tr.total, weak: tr.weak };
   }
   const soil = soilState(days, idx, rainTotal, s, learn);
   // vento dall'ultima pioggia utile (o negli ultimi 20 giorni se non ce n'è)
@@ -242,6 +262,7 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   return {
     timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
     daysSince: best.daysSince, killers: best.killers, soil, wind, lastRainDays, lastRainDate,
+    weakRain: best.weak, // pioggia sotto i 15 mm: voto −20%
   };
 }
 
@@ -340,7 +361,7 @@ export function soilState(days, idx, rainTotal, s, learn) {
 
 // Finestra di date consigliata (dall'ultimo episodio di pioggia valido)
 export function bestDates(summary, forestKey, learn) {
-  const e = summary.lastEpisode;
+  const e = summary.timerEpisode;
   if (!e) return null;
   const t = forestTimer(forestKey, learn);
   return { from: addDays(e.end, t.optStart), to: addDays(e.end, t.optEnd), firstPossible: addDays(e.end, t.start) };

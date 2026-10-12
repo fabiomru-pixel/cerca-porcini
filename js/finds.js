@@ -5,7 +5,7 @@ import { terrainAtPoint } from './dem.js';
 import { temperatureAt, fetchDaily, fetchDailyArchive } from './weather.js';
 import { aspectLabel } from './geo.js';
 import { SPECIES, GROUPS } from './config.js';
-import { rainEpisodes, forestByElevation, forestTempOffset, soilMoisture, forestTimer, addDays } from './engine.js';
+import { rainEpisodes, timerRain, RAIN_FULL_MM, forestByElevation, forestTempOffset, soilMoisture, forestTimer, addDays } from './engine.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
 import { loadGauges, applyGauges } from './gauges.js';
 
@@ -218,7 +218,8 @@ async function dailyAround(lat, lon, date, before = 45) {
 // 2 = pioggia da media di 3 modelli + pluviometri SIR (le fungaie salvate prima usavano il vecchio modello)
 // 3 = la pioggia "madre" è l'ultima caduta almeno 5 giorni prima del ritrovamento (un fungo vecchio trovato
 //     il giorno dopo un temporale insegnava che i porcini nascono in 1 giorno)
-export const SNAPSHOT_VER = 3;
+// 4 = pioggia madre con la regola del timer: la più vecchia da 15 mm (somma dei giorni consecutivi) nei 20 giorni
+export const SNAPSHOT_VER = 4;
 const MIN_FRUIT_DAYS = 5;
 
 async function snapshotFor(place, v, s) {
@@ -232,8 +233,7 @@ async function snapshotFor(place, v, s) {
   const win = w.days.slice(Math.max(0, idx - s.windowDays), idx);
   const meanT = win.reduce((a, d) => a + (d.tmax + d.tmin) / 2, 0) / win.length - dT;
   const meanMax = win.reduce((a, d) => a + d.tmax, 0) / win.length - dT;
-  const eps = rainEpisodes(w.days, idx - 30, idx - MIN_FRUIT_DAYS, s.rainEventMm);
-  const last = eps[eps.length - 1];
+  const tr = timerRain(w.days, idx - s.rainWindowDays, idx - MIN_FRUIT_DAYS, s.rainEventMm);
   const rain = w.days.slice(Math.max(0, idx - s.rainWindowDays), idx).reduce((a, d) => a + (d.rain ?? 0), 0);
   const soilTheta = soilMoisture(w.days, idx - 1); // stato del suolo la mattina del ritrovamento (prima della pioggia di quel giorno)
   const expo = place.slope >= 3 ? -Math.cos((place.aspect * Math.PI) / 180) * Math.min(1, place.slope / 12) * ((s.southOffsetM * g) / 100) : 0;
@@ -257,7 +257,7 @@ async function snapshotFor(place, v, s) {
     meanT: Math.round(meanT * 10) / 10,
     meanMax: Math.round(meanMax * 10) / 10,
     groundT: Math.round((meanT + expo + forestTempOffset(place.elevation, place.forestKey)) * 10) / 10,
-    daysSince: last ? idx - last.endIdx : null,
+    daysSince: tr ? idx - tr.timerIdx : null,
     rainTotal: Math.round(rain),
     soilTheta: Math.round(soilTheta * 100) / 100,
     group: groupOf(place, v),
@@ -421,9 +421,13 @@ export async function predictPlace(place, s, learn) {
   const w = applyGauges(w0, await loadGauges({ lat: place.lat, lon: place.lon, km: 0 }));
   const today = todayStr();
   const idx = w.days.findIndex((d) => d.date === today);
-  const eps = rainEpisodes(w.days, idx - 30, w.days.length - 1, s.rainEventMm).map((e) => ({
-    end: w.days[e.endIdx].date, total: Math.round(e.total), future: w.days[e.endIdx].date > today,
-  }));
+  // pioggia del timer di oggi + piogge previste da 15 mm (diventano il nuovo timer quando quella di oggi esce dai 20 giorni)
+  const eps = [];
+  const cur = timerRain(w.days, idx - s.rainWindowDays + 1, idx, s.rainEventMm);
+  if (cur) eps.push({ end: w.days[cur.timerIdx].date, total: Math.round(cur.total), future: false, weak: cur.weak });
+  for (const e of rainEpisodes(w.days, idx + 1, w.days.length - 1, RAIN_FULL_MM)) {
+    eps.push({ end: w.days[e.endIdx].date, total: Math.round(e.total), future: true, weak: false });
+  }
   const windows = eps.map((e) => ({ ...e, from: addDays(e.end, idealDays - 2), to: addDays(e.end, idealDays + 2), ideal: addDays(e.end, idealDays) }));
   const next = windows.find((x) => x.to >= today) || null;
   return { idealDays, source, fk, windows, next, soilNow: soilMoisture(w.days, idx), rainSrc: w.rainSrc };
