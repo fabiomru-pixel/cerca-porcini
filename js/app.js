@@ -221,6 +221,12 @@ function accessText(acc) {
   const d = acc.distM < 1000 ? `${acc.distM} m` : `${fmt1(acc.distM / 1000)} km`;
   return `Strada a ${d} (${acc.walkMin} min a piedi)`;
 }
+// Microclima umido vicino a fossi e impluvi
+function microText(m) {
+  const where = m.distM < 30 ? 'sul fosso' : `fosso a ${m.distM} m${m.hand ? ` (+${m.hand} m)` : ''}`;
+  const air = m.rh != null ? ` · aria ${m.rh}%${m.windMean != null ? `, vento ${m.windMean} km/h` : ''}` : '';
+  return `Microclima umido: ${where}${air}${m.soilGain >= 3 ? ` · suolo +${m.soilGain}` : ''}`;
+}
 // Vento forte dopo la pioggia e penalità del versante
 function windText(w) {
   if (!w) return '';
@@ -264,6 +270,7 @@ function spotPopup(s) {
     ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()}</span><br>` : ''}
     ${s.access ? `<span class="small">${accessText(s.access)}</span><br>` : ''}
     ${s.lastRainDays != null ? `<span class="small" style="${s.lastRainDays > 20 ? 'color:var(--danger)' : ''}">Ultima pioggia: ${itDate(s.lastRainDate)} (${s.lastRainDays} gg fa)${s.lastRainDays > 20 ? ' – troppo vecchia, voto ridotto' : ''} · ${s.rainTotal} mm in 20 gg</span><br>` : `<span class="small" style="color:var(--danger)">Nessuna pioggia utile negli ultimi 40 giorni · ${s.rainTotal} mm in 20 gg</span><br>`}
+    ${s.micro ? `<span class="small" style="color:var(--ok)">${microText(s.micro)}</span><br>` : ''}
     ${s.nearEmpty ? `<span class="small" style="color:var(--warn)">Tua uscita a vuoto a ${s.nearEmpty.m} m il ${itDate(s.nearEmpty.date)}: voto ridotto</span><br>` : ''}
     ${s.wind ? `<span class="muted small">${windText(s.wind)}</span><br>` : ''}
     ${scoreBreakdown(s)}

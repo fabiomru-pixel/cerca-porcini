@@ -5,7 +5,7 @@ import { terrainAtPoint } from './dem.js';
 import { temperatureAt, fetchDaily, fetchDailyArchive } from './weather.js';
 import { aspectLabel } from './geo.js';
 import { SPECIES, GROUPS } from './config.js';
-import { rainEpisodes, timerRain, RAIN_FULL_MM, forestByElevation, forestTempOffset, soilMoisture, forestTimer, addDays } from './engine.js';
+import { rainEpisodes, timerRain, RAIN_FULL_MM, airMoisture, forestByElevation, forestTempOffset, soilMoisture, forestTimer, addDays } from './engine.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
 import { loadGauges, applyGauges } from './gauges.js';
 
@@ -219,7 +219,8 @@ async function dailyAround(lat, lon, date, before = 45) {
 // 3 = la pioggia "madre" è l'ultima caduta almeno 5 giorni prima del ritrovamento (un fungo vecchio trovato
 //     il giorno dopo un temporale insegnava che i porcini nascono in 1 giorno)
 // 4 = pioggia madre con la regola del timer: la più vecchia da 15 mm (somma dei giorni consecutivi) nei 20 giorni
-export const SNAPSHOT_VER = 4;
+// 5 = + umidità dell'aria e vento medi dei 7 giorni prima (microclima)
+export const SNAPSHOT_VER = 5;
 const MIN_FRUIT_DAYS = 5;
 
 async function snapshotFor(place, v, s) {
@@ -258,6 +259,7 @@ async function snapshotFor(place, v, s) {
     meanMax: Math.round(meanMax * 10) / 10,
     groundT: Math.round((meanT + expo + forestTempOffset(place.elevation, place.forestKey)) * 10) / 10,
     daysSince: tr ? idx - tr.timerIdx : null,
+    air: airMoisture(w.days, idx - 1), // umidità dell'aria e vento medi nei 7 giorni prima del ritrovamento
     rainTotal: Math.round(rain),
     soilTheta: Math.round(soilTheta * 100) / 100,
     group: groupOf(place, v),

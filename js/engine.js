@@ -263,7 +263,30 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
     timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
     daysSince: best.daysSince, killers: best.killers, soil, wind, lastRainDays, lastRainDate,
     weakRain: best.weak, // pioggia sotto i 15 mm: voto −20%
+    air: airMoisture(days, idx), // umidità dell'aria e calma di vento negli ultimi 7 giorni
   };
+}
+
+// ---------- Microclima umido ----------
+// Nei periodi secchi i porcini nascono lo stesso dove l'aria resta umida e non c'è vento che asciuga,
+// soprattutto vicino a fossi e torrenti e negli impluvi (riscontro dell'utente, ottobre 2026).
+// Aria: umidità media dei 7 giorni fino al giorno scelto, piena da 75%, nulla sotto 60%;
+// calma: vento medio sotto 8 km/h pieno, sopra 15 km/h nullo.
+const rampE = (x, a, b) => Math.max(0, Math.min(1, (x - a) / (b - a)));
+export function airMoisture(days, idx, n = 7) {
+  const win = days.slice(Math.max(0, idx - n + 1), idx + 1);
+  const mean = (xs) => { const v = xs.filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const rh = mean(win.map((d) => d.rh)), wind = mean(win.map((d) => d.windMean));
+  if (rh == null) return null;
+  const f = rampE(rh, 60, 75) * (wind == null ? 1 : 1 - rampE(wind, 8, 15));
+  return { rh: Math.round(rh), wind: wind == null ? null : Math.round(wind), f };
+}
+// Suolo con microclima: in una zona umida (wetM 0–1) con aria umida e calma (airF 0–1) si recupera
+// fino a metà del suolo che manca (suolo 30 -> 65 in un fondovalle umido con aria all'85% senza vento)
+export const MICRO_SOIL_MAX = 0.5;
+export const MICRO_PLACE_MAX = 0.05; // vicino all'acqua: fino a +5% sul luogo in ogni periodo (con +10% due spot su tre finivano nei fossi)
+export function microSoil(soilF, wetM, airF) {
+  return soilF + (1 - soilF) * MICRO_SOIL_MAX * (wetM || 0) * (airF || 0);
 }
 
 // ---------- Pioggia troppo vecchia ----------

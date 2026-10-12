@@ -1,7 +1,7 @@
 // Meteo da Open-Meteo (gratuito, senza chiave)
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
-const DAILY = 'temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant,et0_fao_evapotranspiration';
+const DAILY = 'temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant,et0_fao_evapotranspiration,relative_humidity_2m_mean,wind_speed_10m_mean';
 
 function toDays(d) {
   return d.time.map((t, i) => ({
@@ -12,6 +12,8 @@ function toDays(d) {
     wind: d.wind_speed_10m_max[i],
     windDir: d.wind_direction_10m_dominant[i],
     et0: d.et0_fao_evapotranspiration?.[i] ?? null, // evaporazione potenziale (mm/giorno)
+    rh: d.relative_humidity_2m_mean?.[i] ?? null,   // umidità relativa media dell'aria (%)
+    windMean: d.wind_speed_10m_mean?.[i] ?? null,   // vento medio della giornata (km/h)
   }));
 }
 
@@ -37,6 +39,8 @@ function toDaysEnsemble(d) {
     wind: mean(g('wind_speed_10m_max', i)),
     windDir: meanDir(g('wind_direction_10m_dominant', i)),
     et0: mean(g('et0_fao_evapotranspiration', i)),
+    rh: mean(g('relative_humidity_2m_mean', i)),
+    windMean: mean(g('wind_speed_10m_mean', i)),
     rainModels: g('precipitation_sum', i), // per mostrare l'accordo tra i modelli
   }));
 }
