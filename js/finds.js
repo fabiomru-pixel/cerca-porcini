@@ -216,7 +216,10 @@ async function dailyAround(lat, lon, date, before = 45) {
 
 // Versione del calcolo meteo dei ritrovamenti: quando cambia, i dati salvati vengono ricalcolati da soli
 // 2 = pioggia da media di 3 modelli + pluviometri SIR (le fungaie salvate prima usavano il vecchio modello)
-export const SNAPSHOT_VER = 2;
+// 3 = la pioggia "madre" è l'ultima caduta almeno 5 giorni prima del ritrovamento (un fungo vecchio trovato
+//     il giorno dopo un temporale insegnava che i porcini nascono in 1 giorno)
+export const SNAPSHOT_VER = 3;
+const MIN_FRUIT_DAYS = 5;
 
 async function snapshotFor(place, v, s) {
   const date = v.datetime.slice(0, 10);
@@ -229,7 +232,7 @@ async function snapshotFor(place, v, s) {
   const win = w.days.slice(Math.max(0, idx - s.windowDays), idx);
   const meanT = win.reduce((a, d) => a + (d.tmax + d.tmin) / 2, 0) / win.length - dT;
   const meanMax = win.reduce((a, d) => a + d.tmax, 0) / win.length - dT;
-  const eps = rainEpisodes(w.days, idx - s.rainWindowDays, idx - 1, s.rainEventMm);
+  const eps = rainEpisodes(w.days, idx - 30, idx - MIN_FRUIT_DAYS, s.rainEventMm);
   const last = eps[eps.length - 1];
   const rain = w.days.slice(Math.max(0, idx - s.rainWindowDays), idx).reduce((a, d) => a + (d.rain ?? 0), 0);
   const soilTheta = soilMoisture(w.days, idx - 1); // stato del suolo la mattina del ritrovamento (prima della pioggia di quel giorno)

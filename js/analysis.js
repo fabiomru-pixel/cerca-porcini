@@ -134,6 +134,13 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const cands = [];
   const ctx = { meanT: summary.meanT, meanMax: summary.meanMax, valleyElev, gradient: s.gradient, southOffsetM: s.southOffsetM, learn };
   const nearFinds = finds.filter((f) => f.lat && distKm(center, f) < radius + 5);
+  // bonus "vicino a una tua fungaia": conta la fungaia più vicina (fino a +25% sul posto, svanisce entro 2 km).
+  // Prima i bonus di più fungaie si moltiplicavano: due luoghi salvati nello stesso punto davano +56%.
+  const nearFindBonus = (p) => {
+    let best = 0;
+    for (const f of nearFinds) { const d = distKm(p, f); if (d < 2) best = Math.max(best, Math.exp(-(d * d) / 0.8)); }
+    return 1 + 0.25 * best;
+  };
   // uscite a vuoto recenti: la zona è stata battuta senza trovare niente. Penalità entro 1,5 km che
   // svanisce in 3 settimane e si riduce molto se nel frattempo è tornata a piovere
   const nearEmpties = empties.filter((e) => e.lat && distKm(center, e) < radius + 5);
@@ -180,10 +187,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const w = nearestWeather(grid, byIJ, ll.lat, ll.lon, center);
       const tm = w.timing[fk];
       let bonus = edgeAt(ox, oy);
-      for (const f of nearFinds) {
-        const d = distKm(ll, f);
-        if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8);
-      }
+      bonus *= nearFindBonus(ll);
       bonus *= emptyFactor(ll, tm);
       let best = null;
       for (const g of groups) {
@@ -208,7 +212,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     const w = areaW || nearestWeather(grid, byIJ, ll.lat, ll.lon, center);
     const tm = w.timing[fk];
     let bonus = edgeBonus;
-    for (const f of nearFinds) { const d = distKm(ll, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
+    bonus *= nearFindBonus(ll);
     bonus *= emptyFactor(ll, tm);
     let best = null;
     for (const g of groups) {
@@ -363,7 +367,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       for (const g of groups) {
         const pl = evalPlace({ elevation: c.elevation, slope: c.slope, aspect: c.aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
         let bonus = edge;
-        for (const f of nearFinds) { const d = distKm(c, f); if (d < 2) bonus *= 1 + 0.25 * Math.exp(-(d * d) / 0.8); }
+        bonus *= nearFindBonus(c);
         bonus *= emptyFactor(c, tm);
         const fin = combine(pl.score, tm, g.weight, bonus, hot);
         if (!best || fin > best.fin) best = { fin, pl, g, bonus };
@@ -506,10 +510,11 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const w = atPoint(w0, place.lat, place.lon);
       const tm = evalTiming(w, date, s, fk, elevation, learnF);
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
+      const fBonus = nearFindBonus(place) * emptyFactor(place, tm);
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
-        const fin = combine(pl.score, tm, g.weight, emptyFactor(place, tm), hot);
+        const fin = combine(pl.score, tm, g.weight, fBonus, hot);
         if (!best || fin > best.fin) best = { fin, pl, g };
       }
       const sm = placeSummary(place);
@@ -522,8 +527,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         score: Math.round(best.fin * 100),
         soil: { theta: Math.round(tm.soil.theta * 100), cls: tm.soil.cls, label: tm.soil.label },
         parts: {
-          luogo: Math.round(best.pl.score * 100), suolo: Math.round(tm.soil.factor * 100),
-          timer: Math.round(tm.timer * 100), stagione: Math.round(best.g.weight * 100), bonus: 0,
+          luogo: Math.round(Math.min(1, best.pl.score * fBonus) * 100), suolo: Math.round(tm.soil.factor * 100),
+          timer: Math.round(tm.timer * 100), stagione: Math.round(best.g.weight * 100), bonus: Math.round((fBonus - 1) * 100),
         },
         fk, place: Math.round(best.pl.score * 100), timing: Math.round(tm.timer * 100),
         tLocal: Math.round(best.pl.tLocal * 10) / 10,
