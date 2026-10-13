@@ -261,8 +261,7 @@ function spotPopup(s) {
   const z = s.zone ? (state.analysis?.zones || []).find((x) => x.id === s.zone) : null;
   const zoneTxt = z ? `<div class="small" style="margin:2px 0 4px"><span class="pill zone">Zona ${z.id}</span> ${zoneCountTxt(z)} · giro ad anello ~${fmt1(z.tourKm)} km in linea d'aria: ${z.spots.join(' → ')} → ${z.spots[0]}
     <a class="btn small block" style="margin-top:6px" target="_blank" rel="noopener" href="${zoneTourUrl(z, state.analysis)}">${icon('nav')} Giro della zona su Mapy.com</a></div>` : '';
-  const fung = s.fungaia ? `<div class="small" style="margin:2px 0 4px"><span class="pill ok">La tua fungaia</span> ${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}<br>
-    <span class="muted">Timer di questa fungaia: ideale ${s.idealDays} giorni dopo la pioggia${s.daysSince != null ? ` · oggi ${s.daysSince} gg dalla pioggia` : ''}</span></div>` : '';
+  const fung = s.fungaia ? `<div class="small" style="margin:2px 0 4px"><span class="pill ok">La tua fungaia</span> ${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}</div>` : '';
   return `<b>${s.id} · ${s.score}/100</b><br>${fung}${zoneTxt}
     ${s.elevation} m · esposizione ${s.aspectLabel} · pendenza ${s.slope}°<br>
     ${esc(s.forest)}${s.edge ? ' · margine/radura' : ''}<br>

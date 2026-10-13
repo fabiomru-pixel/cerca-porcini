@@ -216,12 +216,11 @@ export function expoBonus(aspect, regime) {
 }
 
 // ---------- Timer dopo la pioggia ----------
+// Curva continua (nessuno scalino): un giorno di differenza nella pioggia misurata tra due spot vicini
+// cambia il timer di poco. Prima saltava 0,05 → 0,25 → 0,5 in due giorni (voti 25 contro 41 a 500 m).
 export function timerScore(daysSince, t) {
-  if (daysSince < t.start) return daysSince >= t.start - 2 ? 0.25 : 0.05;
-  if (daysSince < t.optStart) return 0.5 + 0.5 * (daysSince - t.start) / Math.max(1, t.optStart - t.start);
-  if (daysSince <= t.optEnd) return 1;
-  if (daysSince <= t.end) return 1 - 0.7 * (daysSince - t.optEnd) / Math.max(1, t.end - t.optEnd);
-  return 0.15;
+  const optStart = Math.max(t.start, t.optStart), optEnd = Math.max(optStart, t.optEnd), end = Math.max(optEnd + 1, t.end);
+  return piecewise(daysSince, [[t.start - 5, 0.05], [optStart, 1], [optEnd, 1], [end, 0.3], [end + 5, 0.15]]);
 }
 
 // Tempismo in un punto meteo (pioggia locale, timer, killer). cellElev per correggere Tmin/Tmax in quota.

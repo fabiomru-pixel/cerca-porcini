@@ -405,13 +405,9 @@ export function computeLearn(allFinds) {
 export function placeIdealDays(place, learn) {
   place = normalizeFind(place);
   const fk = place.forestKey || forestByElevation(place.elevation ?? 800).key;
-  const own = placeSummary(place).visits.filter((v) => isPositive(v) && v.snapshot?.daysSince != null);
-  if (own.length) {
-    let sum = 0, ws = 0;
-    for (const v of own) { const w = 1 + Math.log2(1 + v.count) / 2; sum += w * (v.snapshot.daysSince + (visitOffset(v)?.days || 0)); ws += w; }
-    return { fk, idealDays: Math.round(sum / ws), own: own.length, source: `${own.length} ritrovament${own.length === 1 ? 'o' : 'i'} in questa fungaia` };
-  }
-  return { fk, idealDays: TIMER_CENTER[fk] + (learn?.timer?.[fk] || 0), own: 0, source: 'regole del bosco (nessun ritrovamento con dati meteo qui)' };
+  // Timer uguale per tutti i luoghi dello stesso bosco, fungaie comprese (regola dell'utente, ottobre 2026):
+  // un timer per singola fungaia la penalizzava rispetto agli spot accanto
+  return { fk, idealDays: TIMER_CENTER[fk] + (learn?.timer?.[fk] || 0), own: 0, source: 'regole del bosco, affinate con i tuoi ritrovamenti' };
 }
 export { TIMER_CENTER };
 

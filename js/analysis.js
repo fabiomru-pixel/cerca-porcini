@@ -154,6 +154,13 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     for (const f of nearFinds) { const d = distKm(p, f); if (d < 2) best = Math.max(best, Math.exp(-(d * d) / 0.8)); }
     return 1 + 0.25 * best;
   };
+  // tipo di bosco indicato da te in una fungaia entro 300 m: vale anche per gli spot attorno (stesso bosco,
+  // stesso timer). La carta dei boschi a 900–1000 m confonde spesso faggi e castagni.
+  const userForest = (p) => {
+    let fk = null, bd = 0.3;
+    for (const f of nearFinds) { if (!f.forestKey) continue; const d = distKm(p, f); if (d < bd) { bd = d; fk = f.forestKey; } }
+    return fk;
+  };
   // uscite a vuoto recenti: la zona è stata battuta senza trovare niente. Penalità entro 1,5 km che
   // svanisce in 3 settimane e si riduce molto se nel frattempo è tornata a piovere
   const nearEmpties = empties.filter((e) => e.lat && distKm(center, e) < radius + 5);
@@ -196,7 +203,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       if (elevation < 50 || elevation > 2100) continue;
       const { slope, aspect } = mosaic.slopeAspectPx(px, py, saStep);
       if (aspectTarget != null && (slope < 3 || angDiff(aspect, aspectTarget) > 30)) continue; // esposizione scelta
-      const fk = cellForestKey(elevation, forest?.code[k]);
+      const fk = userForest(ll) || cellForestKey(elevation, forest?.code[k]);
       const w = nearestWeather(grid, byIJ, ll.lat, ll.lon, center);
       const tm = w.timing[fk];
       let bonus = edgeAt(ox, oy);
@@ -222,7 +229,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
 
   // valutazione di un punto (usata nella scansione fine)
   const scoreCell = (ll, elevation, slope, aspect, code, edgeBonus, areaW, wet) => {
-    const fk = cellForestKey(elevation, code);
+    const fk = userForest(ll) || cellForestKey(elevation, code);
     const w = areaW || nearestWeather(grid, byIJ, ll.lat, ll.lon, center);
     const tm = w.timing[fk];
     let bonus = edgeBonus;
@@ -373,7 +380,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       // pioggia misurata nel punto esatto dello spot (pluviometri più vicini a lui)
       const w = atPoint(c.w || nearestWeather(grid, byIJ, c.lat, c.lon, center), c.lat, c.lon);
       const code = c.patch ? (c.patch.frac === 0 ? 0 : c.patch.broad >= c.patch.conif ? 1 : 2) : c.code;
-      const fk = cellForestKey(c.elevation, code);
+      const fk = userForest(c) || cellForestKey(c.elevation, code);
       const tm = evalTiming(w, date, s, fk, c.elevation, learn);
       // suolo secco conta come "piogge scarse" anche se nei 20 giorni è caduta la quantità minima
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
@@ -478,10 +485,9 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       }
       // timer personale: i giorni ideali di questa fungaia diventano il centro della finestra
       const ideal = placeIdealDays({ ...place, forestKey: fk, elevation }, learn);
-      const learnF = { ...learn, timer: { ...(learn?.timer || {}), [fk]: ideal.idealDays - TIMER_CENTER[fk] } };
       const w0 = allWx.reduce((b, x) => (distKm(place, x) < distKm(place, b) ? x : b), allWx[0]);
       const w = atPoint(w0, place.lat, place.lon);
-      const tm = evalTiming(w, date, s, fk, elevation, learnF);
+      const tm = evalTiming(w, date, s, fk, elevation, learn); // stesso timer degli spot
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
       const fBonus = nearFindBonus(place) * emptyFactor(place, tm);
       const fWet = wetMain.at(place.lat, place.lon);
