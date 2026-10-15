@@ -1,7 +1,7 @@
 // Meteo da Open-Meteo (gratuito, senza chiave)
 const FORECAST = 'https://api.open-meteo.com/v1/forecast';
 const ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive';
-const DAILY = 'temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant,et0_fao_evapotranspiration,relative_humidity_2m_mean,wind_speed_10m_mean';
+const DAILY = 'temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_direction_10m_dominant,et0_fao_evapotranspiration,relative_humidity_2m_mean,wind_speed_10m_mean,wind_gusts_10m_max';
 
 function toDays(d) {
   return d.time.map((t, i) => ({
@@ -14,6 +14,7 @@ function toDays(d) {
     et0: d.et0_fao_evapotranspiration?.[i] ?? null, // evaporazione potenziale (mm/giorno)
     rh: d.relative_humidity_2m_mean?.[i] ?? null,   // umidità relativa media dell'aria (%)
     windMean: d.wind_speed_10m_mean?.[i] ?? null,   // vento medio della giornata (km/h)
+    gust: d.wind_gusts_10m_max?.[i] ?? null,        // raffica massima (km/h)
   }));
 }
 
@@ -41,6 +42,8 @@ function toDaysEnsemble(d) {
     et0: mean(g('et0_fao_evapotranspiration', i)),
     rh: mean(g('relative_humidity_2m_mean', i)),
     windMean: mean(g('wind_speed_10m_mean', i)),
+    // raffiche: ICON-EU (7 km) segue meglio i crinali; gli altri modelli smussano molto. Riserva: la più alta dei tre
+    gust: d[`wind_gusts_10m_max_icon_eu`]?.[i] ?? (g('wind_gusts_10m_max', i).filter((x) => x != null).sort((a, b) => b - a)[0] ?? null),
     rainModels: g('precipitation_sum', i), // per mostrare l'accordo tra i modelli
   }));
 }

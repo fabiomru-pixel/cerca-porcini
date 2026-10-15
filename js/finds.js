@@ -5,7 +5,7 @@ import { terrainAtPoint } from './dem.js';
 import { temperatureAt, fetchDaily, fetchDailyArchive } from './weather.js';
 import { aspectLabel } from './geo.js';
 import { SPECIES, GROUPS } from './config.js';
-import { rainEpisodes, timerRain, RAIN_FULL_MM, airMoisture, forestByElevation, forestTempOffset, soilMoisture, forestTimer, addDays } from './engine.js';
+import { rainEpisodes, timerRain, RAIN_FULL_MM, airMoisture, windLoad, forestByElevation, forestTempOffset, soilMoisture, forestTimer, addDays } from './engine.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
 import { loadGauges, applyGauges } from './gauges.js';
 
@@ -242,13 +242,15 @@ async function snapshotFor(place, v, s) {
   // condizioni avverse nei 7 giorni prima (per i funghi "rotti da calore o vento")
   const clim = await climateFor(place.lat, place.lon, date, place.elevation, g);
   const last7 = w.days.slice(Math.max(0, idx - 7), idx + 1);
-  let maxT = -99, maxTDate = null, maxWind = 0, maxWindDate = null;
+  let maxT = -99, maxTDate = null, maxWind = 0, maxWindDate = null, windy = false;
   for (const d of last7) {
     if (d.tmax - dT > maxT) { maxT = d.tmax - dT; maxTDate = d.date; }
-    if ((d.wind ?? 0) > maxWind) { maxWind = d.wind; maxWindDate = d.date; }
+    const wv = Math.max(d.wind ?? 0, d.gust ?? 0);
+    if (wv > maxWind) { maxWind = wv; maxWindDate = d.date; }
+    if (windLoad(d) > 0) windy = true;
   }
   const heat = maxT > clim.maxAnom || maxT >= 30;
-  const wind = maxWind >= 30;
+  const wind = windy;
   const tc = tempClass({ meanT, meanMax }, clim);
   const dry = soilTheta < 0.3 || rain < s.rainMinMm;
 

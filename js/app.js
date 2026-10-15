@@ -230,7 +230,7 @@ function microText(m) {
 // Vento forte dopo la pioggia e penalità del versante
 function windText(w) {
   if (!w) return '';
-  const list = w.winds.slice(0, 2).map((x) => `${x.name} ${x.days} g (max ${x.max} km/h)`).join(', ');
+  const list = w.winds.slice(0, 2).map((x) => `${x.name} ${x.days} g (raffiche fino a ${x.max} km/h)`).join(', ');
   return `Vento dopo la pioggia: ${list}${w.penalty >= 3 ? ` → versante penalizzato −${w.penalty}%` : ' → versante poco esposto'}`;
 }
 
@@ -884,7 +884,7 @@ function visitCard(place, v) {
     ${sn ? `<div class="muted">T suolo ${fmt1(sn.groundT)} °C · umidità suolo ${sn.soilTheta != null ? Math.round(sn.soilTheta * 100) + '%' : '–'} · pioggia 20 gg ${sn.rainTotal} mm${sn.daysSince != null ? ` · ${sn.daysSince} gg dalla pioggia` : ''}${v.temperature != null ? ` · ${fmt1(v.temperature)} °C quel momento` : ''}</div>
     ${sn.ver ? `<div class="muted small">${sn.rainSrc?.type === 'pluviometri' ? `Pioggia misurata: pluviometri SIR (${sn.rainSrc.stations.map((x) => esc(x.n)).join(', ')})` : 'Pioggia stimata: media di 3 modelli meteo'}</div>` : '<div class="muted small">Dati meteo da ricalcolare con la nuova versione…</div>'}` : v.pending ? '<div class="muted">Dati meteo in attesa di rete…</div>' : ''}
     ${off && sn?.daysSince != null ? `<div class="muted">Lettura: ${esc(off.why)} → <b>${shiftTxt}</b> (= ${sn.daysSince + off.days} gg dopo la pioggia)</div>` : ''}
-    ${adv?.any ? `<div style="color:var(--warn)">Nei 7 giorni prima: ${[adv.heat && `caldo anomalo (${fmt1(adv.maxT)} °C il ${itDate(adv.maxTDate)})`, adv.wind && `vento forte (${adv.maxWind} km/h il ${itDate(adv.maxWindDate)})`].filter(Boolean).join(', ')}</div>` : ''}
+    ${adv?.any ? `<div style="color:var(--warn)">Nei 7 giorni prima: ${[adv.heat && `caldo anomalo (${fmt1(adv.maxT)} °C il ${itDate(adv.maxTDate)})`, adv.wind && `vento forte (raffiche ${adv.maxWind} km/h il ${itDate(adv.maxWindDate)})`].filter(Boolean).join(', ')}</div>` : ''}
     ${v.notes ? `<div style="white-space:pre-wrap;margin-top:4px">${esc(v.notes)}</div>` : ''}
   </div>`;
 }

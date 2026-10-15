@@ -313,17 +313,27 @@ export function staleFactor(lastRainDays, hot, limit = STALE_DAYS) {
 // Dopo la pioggia, i giorni di vento forte asciugano soprattutto i versanti rivolti verso il vento
 // (tramontana da N -> versanti esposti a N). Carico per 8 settori di provenienza.
 export const WIND_NAMES = ['Tramontana', 'Grecale', 'Levante', 'Scirocco', 'Ostro', 'Libeccio', 'Ponente', 'Maestrale'];
-export const WIND_MIN_KMH = 30; // raffica media massima giornaliera a 10 m da cui il vento conta
+// Un giorno è ventoso se il vento sostenuto supera 25 km/h OPPURE le raffiche superano 35 km/h.
+// Sui crinali i modelli smussano il vento sostenuto (Acquerino 12–14/10/2026: tramontana tesa sul posto,
+// sostenuto 10–23 km/h nei modelli, raffiche ICON 41–71 km/h): le raffiche sono il segnale più fedele.
+export const WIND_MIN_KMH = 25;
+export const GUST_MIN_KMH = 35;
+export function windLoad(d) {
+  const w = d.wind ?? 0, g = d.gust ?? 0;
+  if (w < WIND_MIN_KMH && g < GUST_MIN_KMH) return 0;
+  return Math.min(2, Math.max((w - 20) / 10, (g - 25) / 20)); // 25 km/h o raffiche 35 = 0,5 · raffiche 65+ = 2
+}
 export function windLoads(days, fromIdx, toIdx) {
   const loads = new Array(8).fill(0);
   const events = [];
   for (let i = Math.max(0, fromIdx); i < toIdx && i < days.length; i++) {
     const d = days[i];
-    if (d.wind == null || d.windDir == null || d.wind < WIND_MIN_KMH) continue;
+    if (d.windDir == null) continue;
+    const l = windLoad(d);
+    if (!l) continue;
     const k = Math.round(d.windDir / 45) % 8;
-    const l = Math.min(2, (d.wind - 25) / 10); // 30 km/h = 0,5 · 35 = 1 · 45+ = 2
     loads[k] += l;
-    events.push({ date: d.date, kmh: Math.round(d.wind), k });
+    events.push({ date: d.date, kmh: Math.round(Math.max(d.wind ?? 0, d.gust ?? 0)), k });
   }
   return { loads, events };
 }
