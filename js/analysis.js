@@ -65,7 +65,7 @@ const microInfo = (wet, tm, soilEff) => (soilEff - tm.soil.factor >= 0.03 ? {
 // + pioggia troppo vecchia (oltre 20 giorni, peggio se fa caldo): vedi staleFactor
 // + microclima (sh = riparo: zona umida o versante Nord, vedi shelterOf): compensa il suolo secco con aria umida e calma
 const combine = (place, tm, season, bonus, hot, sh) => finalScore(Math.min(1, place * bonus), microSoil(tm.soil.factor, sh, tm.air?.f), tm.timer, season)
-  * staleFactor(tm.lastRainDays, hot) * (tm.weakRain ? WEAK_RAIN_FACTOR : 1);
+  * staleFactor(tm.lastRainDays, hot, tm.staleDays) * (tm.weakRain ? WEAK_RAIN_FACTOR : 1);
 
 export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], empties = [], onStep = () => {} }) {
   const radius = s.radiusKm;
@@ -452,7 +452,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         protected: protectedAt(protectedFc, c.lat, c.lon),
         nearFind: nearFinds.some((f) => distKm(c, f) < 1),
         nearEmpty: (() => { const e = nearEmpties.filter((x) => distKm(c, x) <= 1.5 && daysBetween(x.date, date) >= 0 && daysBetween(x.date, date) <= 21).sort((a, b) => distKm(c, a) - distKm(c, b))[0]; return e ? { date: e.date, m: Math.round(distKm(c, e) * 1000) } : null; })(),
-        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate,
+        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate, staleDays: tm.staleDays,
         regime,
       };
     })
@@ -539,7 +539,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         forest: FORESTS[fk].label,
         forestType: patch ? `${patch.type}, copertura ${Math.round(patch.frac * 100)}%` : place.forest || null,
         rainTotal: Math.round(tm.rainTotal), daysSince: tm.daysSince, killers: tm.killers,
-        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate,
+        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate, staleDays: tm.staleDays,
         protected: protectedAt(protectedFc, place.lat, place.lon),
         regime, idealDays: ideal.idealDays, idealSource: ideal.source,
         rainSrc: w.rainSrc,

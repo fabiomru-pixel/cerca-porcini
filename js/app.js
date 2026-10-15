@@ -268,7 +268,7 @@ function spotPopup(s) {
     <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C</span><br>
     ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()}</span><br>` : ''}
     ${s.access ? `<span class="small">${accessText(s.access)}</span><br>` : ''}
-    ${s.lastRainDays != null ? `<span class="small" style="${s.lastRainDays > 20 ? 'color:var(--danger)' : ''}">Ultima pioggia: ${itDate(s.lastRainDate)} (${s.lastRainDays} gg fa)${s.lastRainDays > 20 ? ' – troppo vecchia, voto ridotto' : ''} · ${s.rainTotal} mm in 20 gg</span><br>` : `<span class="small" style="color:var(--danger)">Nessuna pioggia utile negli ultimi 40 giorni · ${s.rainTotal} mm in 20 gg</span><br>`}
+    ${s.lastRainDays != null ? `<span class="small" style="${s.lastRainDays > (s.staleDays || 20) ? 'color:var(--danger)' : ''}">Ultima pioggia: ${itDate(s.lastRainDate)} (${s.lastRainDays} gg fa)${s.lastRainDays > (s.staleDays || 20) ? ' – troppo vecchia, voto ridotto' : ''} · ${s.rainTotal} mm in 20 gg</span><br>` : `<span class="small" style="color:var(--danger)">Nessuna pioggia utile negli ultimi 40 giorni · ${s.rainTotal} mm in 20 gg</span><br>`}
     ${s.micro ? `<span class="small" style="color:var(--ok)">${microText(s.micro)}</span><br>` : ''}
     ${s.nearEmpty ? `<span class="small" style="color:var(--warn)">Tua uscita a vuoto a ${s.nearEmpty.m} m il ${itDate(s.nearEmpty.date)}: voto ridotto</span><br>` : ''}
     ${s.wind ? `<span class="muted small">${windText(s.wind)}</span><br>` : ''}
@@ -507,7 +507,7 @@ function renderResults() {
   const alerts = [];
   {
     const all = [...a.spots, ...(a.fungaie || [])];
-    const stale = all.filter((x) => x.lastRainDays == null || x.lastRainDays > 20);
+    const stale = all.filter((x) => x.lastRainDays == null || x.lastRainDays > (x.staleDays || 20));
     const vd = a.summary.lastRainDays;
     if (stale.length) {
       const hot = a.tc?.high || a.tc?.maxAnom;

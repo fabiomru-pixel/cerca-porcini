@@ -232,9 +232,14 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   const eps = rainEpisodes(days, from, idx, s.rainEventMm);
   const t = forestTimer(forestKey, learn);
   const dT = cellElev != null && wp.elevation != null ? ((cellElev - wp.elevation) * s.gradient) / 100 : 0;
+  // i faggi (timer "diesel") fruttificano fino a ~24 giorni dopo la pioggia: la pioggia del timer si cerca
+  // fino a quel giorno, e la penalità "pioggia vecchia" parte solo dopo. Querce e castagni restano a 20.
+  const longTimer = forestKey === 'faggio';
+  const timerFrom = longTimer ? Math.min(from, idx - t.end) : from;
+  const staleDays = longTimer ? Math.max(STALE_DAYS, t.end) : STALE_DAYS;
 
   let best = { score: 0.05, daysSince: null, killers: [], weak: false };
-  const tr = timerRain(days, from, idx, s.rainEventMm);
+  const tr = timerRain(days, timerFrom, idx, s.rainEventMm);
   if (tr) {
     const daysSince = idx - tr.timerIdx;
     let sc = timerScore(daysSince, t);
@@ -262,6 +267,7 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
     timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
     daysSince: best.daysSince, killers: best.killers, soil, wind, lastRainDays, lastRainDate,
     weakRain: best.weak, // pioggia sotto i 15 mm: voto −20%
+    staleDays, // oltre questi giorni dall'ultima pioggia il voto si riduce (20; faggi fino a fine timer)
     air: airMoisture(days, idx), // umidità dell'aria e calma di vento negli ultimi 7 giorni
   };
 }
@@ -298,8 +304,8 @@ export function microSoil(soilF, shelter, airF) {
 // Oltre 20 giorni dall'ultima pioggia utile il micelio smette di fruttificare: voto fortemente ridotto,
 // ancora di più se fa più caldo della media del periodo (riscontro sul campo, ottobre 2026)
 export const STALE_DAYS = 20;
-export function staleFactor(lastRainDays, hot) {
-  if (lastRainDays != null && lastRainDays <= STALE_DAYS) return 1;
+export function staleFactor(lastRainDays, hot, limit = STALE_DAYS) {
+  if (lastRainDays != null && lastRainDays <= limit) return 1;
   return hot ? 0.35 : 0.5;
 }
 
