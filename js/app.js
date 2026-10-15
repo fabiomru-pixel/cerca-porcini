@@ -47,7 +47,9 @@ async function saveSettings(patch) {
   Object.assign(state.settings, patch);
   await kv.set('settings', state.settings);
 }
-const scoreColor = (s) => (s >= 70 ? '#15803d' : s >= 50 ? '#65a30d' : s >= 35 ? '#ca8a04' : '#9a6b4f');
+// colore del voto (palette): alto oro, medio verde salice, basso verde acqua (testo chiaro)
+const scoreColor = (s) => (s >= 70 ? '#FFBF46' : s >= 40 ? '#8ACB88' : '#648381');
+const scoreFg = (s) => (s >= 40 ? '#3d3d45' : '#ffffff');
 
 // ---------------------------------------------------------------- tema
 function applyTheme(t) {
@@ -57,7 +59,7 @@ function applyTheme(t) {
   const dark = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
   $('#themeBtn').innerHTML = icon(t === 'auto' ? 'auto' : dark ? 'moon' : 'sun');
   $$('#themeSeg button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.v === t));
-  document.querySelector('meta[name="theme-color"]').content = dark ? '#161c19' : '#2f6d3c';
+  document.querySelector('meta[name="theme-color"]').content = dark ? '#3a3a41' : '#E4FDE1';
 }
 
 // ---------------------------------------------------------------- mappa
@@ -210,8 +212,8 @@ function navButtons(lat, lon, { walk = false, small = false } = {}) {
   const cls = small ? 'btn small nav-btn' : 'btn nav-btn';
   const links = [];
   if (!walk) links.push(['Waze', `https://waze.com/ul?ll=${lat},${lon}&navigate=yes`]);
-  links.push(['Google Maps', `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=${walk ? 'walking' : 'driving'}`]);
-  links.push(['Mapy.com', `https://mapy.com/fnc/v1/route?${from ? `start=${from.lon},${from.lat}&` : ''}end=${lon},${lat}&routeType=${walk ? 'foot_hiking' : 'car_fast'}`]);
+  links.push([small ? 'Maps' : 'Google Maps', `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=${walk ? 'walking' : 'driving'}`]);
+  links.push([small ? 'Mapy' : 'Mapy.com', `https://mapy.com/fnc/v1/route?${from ? `start=${from.lon},${from.lat}&` : ''}end=${lon},${lat}&routeType=${walk ? 'foot_hiking' : 'car_fast'}`]);
   return `<div class="nav-row">${links.map(([n, u]) => `<a class="${cls}" target="_blank" rel="noopener" href="${u}">${n}</a>`).join('')}</div>`;
 }
 
@@ -256,26 +258,34 @@ function scoreBreakdown(s) {
 
 function spotPopup(s) {
   const prot = s.protected
-    ? `<div class="alert ${s.protected.strict ? 'bad' : 'warn'}" style="margin:8px 0 0">${s.protected.strict ? 'Riserva a protezione integrale: raccolta quasi certamente vietata.' : 'Area protetta: verifica il regolamento prima di raccogliere.'}<br><b>${esc(s.protected.name)}</b></div>` : '';
+    ? `<div class="alert ${s.protected.strict ? 'bad' : 'warn'}" style="margin:8px 0 0">${s.protected.strict ? 'Riserva integrale: raccolta quasi certamente vietata' : 'Area protetta: verifica il regolamento'} · <b>${esc(s.protected.name)}</b></div>` : '';
   const kill = s.killers.length ? `<div class="alert warn" style="margin:8px 0 0">Timer fermato da: ${s.killers.join(', ')}</div>` : '';
   const z = s.zone ? (state.analysis?.zones || []).find((x) => x.id === s.zone) : null;
-  const zoneTxt = z ? `<div class="small" style="margin:2px 0 4px"><span class="pill zone">Zona ${z.id}</span> ${zoneCountTxt(z)} · giro ad anello ~${fmt1(z.tourKm)} km in linea d'aria: ${z.spots.join(' → ')} → ${z.spots[0]}
-    <a class="btn small block" style="margin-top:6px" target="_blank" rel="noopener" href="${zoneTourUrl(z, state.analysis)}">${icon('nav')} Giro della zona su Mapy.com</a></div>` : '';
-  const fung = s.fungaia ? `<div class="small" style="margin:2px 0 4px"><span class="pill ok">La tua fungaia</span> ${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}</div>` : '';
-  return `<b>${s.id} · ${s.score}/100</b><br>${fung}${zoneTxt}
-    ${s.elevation} m · esposizione ${s.aspectLabel} · pendenza ${s.slope}°<br>
-    ${esc(s.forest)}${s.edge ? ' · margine/radura' : ''}<br>
-    <span class="muted">T stimata al suolo ${fmt1(s.tLocal)} °C</span><br>
-    ${s.regime ? `<span class="muted">Situazione: ${REGIMES[s.regime].label.toLowerCase()}</span><br>` : ''}
-    ${s.access ? `<span class="small">${accessText(s.access)}</span><br>` : ''}
-    ${s.lastRainDays != null ? `<span class="small" style="${s.lastRainDays > (s.staleDays || 20) ? 'color:var(--danger)' : ''}">Ultima pioggia: ${itDate(s.lastRainDate)} (${s.lastRainDays} gg fa)${s.lastRainDays > (s.staleDays || 20) ? ' – troppo vecchia, voto ridotto' : ''} · ${s.rainTotal} mm in 20 gg</span><br>` : `<span class="small" style="color:var(--danger)">Nessuna pioggia utile negli ultimi 40 giorni · ${s.rainTotal} mm in 20 gg</span><br>`}
-    ${s.micro ? `<span class="small" style="color:var(--ok)">${microText(s.micro)}</span><br>` : ''}
-    ${s.nearEmpty ? `<span class="small" style="color:var(--warn)">Tua uscita a vuoto a ${s.nearEmpty.m} m il ${itDate(s.nearEmpty.date)}: voto ridotto</span><br>` : ''}
-    ${s.wind ? `<span class="muted small">${windText(s.wind)}</span><br>` : ''}
-    ${scoreBreakdown(s)}
+  const stale = s.lastRainDays != null && s.lastRainDays > (s.staleDays || 20);
+  const rain = s.lastRainDays != null
+    ? `<span${stale ? ' style="color:var(--danger)"' : ''}>Pioggia ${itDate(s.lastRainDate)}${stale ? ' (vecchia)' : ''}</span> · ${s.rainTotal} mm in 20 gg`
+    : `<span style="color:var(--danger)">Nessuna pioggia utile</span> · ${s.rainTotal} mm in 20 gg`;
+  const road = s.access ? ` · strada a ${s.access.distM < 1000 ? s.access.distM + ' m' : fmt1(s.access.distM / 1000) + ' km'} (${s.access.walkMin} min)` : '';
+  const pinBg = s.fungaia ? 'var(--charcoal)' : scoreColor(s.score), pinFg = s.fungaia ? 'var(--gold)' : scoreFg(s.score);
+  // dettagli: tutto ciò che spiega il voto, a richiesta
+  const details = [
+    `${esc(s.forest)}${s.edge ? ' · margine o radura' : ''}`,
+    s.fungaia ? `${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}` : '',
+    s.micro ? `<span style="color:var(--ok)">${microText(s.micro)}</span>` : '',
+    s.nearEmpty ? `<span style="color:var(--warn)">Uscita a vuoto a ${s.nearEmpty.m} m il ${itDate(s.nearEmpty.date)}: voto ridotto</span>` : '',
+    s.wind ? windText(s.wind) : '',
+    z ? `Giro zona ${z.id}: ${z.spots.join(' → ')} → ${z.spots[0]} (~${fmt1(z.tourKm)} km)` : '',
+  ].filter(Boolean).map((x) => `<div>${x}</div>`).join('');
+  return `<div class="pop-head">
+      <div class="pop-score" style="background:${pinBg};color:${pinFg}">${s.score}</div>
+      <div class="grow"><div class="pop-id">${s.fungaia ? 'La tua fungaia' : `Spot ${s.id}`}${z ? ` <span class="pill zone">Zona ${z.id}</span>` : ''}</div>
+        <div class="pop-sub">${s.elevation} m · ${s.aspectLabel} · ${s.slope}°</div></div>
+    </div>
+    <div class="pop-line">${rain}${road}</div>
     ${prot}${kill}
-    <div class="small muted" style="margin-top:8px">Portami qui con:</div>
+    ${z ? `<a class="btn small block" style="margin-top:8px" target="_blank" rel="noopener" href="${zoneTourUrl(z, state.analysis)}">${icon('nav')} Giro della zona su Mapy</a>` : ''}
     ${navButtons(s.lat, s.lon, { small: true })}
+    <details class="pop-more"><summary>Dettagli</summary>${details}${scoreBreakdown(s)}</details>
     ${s.fungaia ? `<button class="btn small block" style="margin-top:6px" data-open-place="${s.placeId}">Apri la scheda della fungaia</button>` : ''}`;
 }
 
@@ -298,8 +308,8 @@ function drawAnalysis(a, fit = false) {
   }
   for (const s of a.spots) {
     const m = L.marker([s.lat, s.lon], {
-      icon: L.divIcon({ className: '', html: `<div class="spot-pin" style="background:${scoreColor(s.score)}${s.protected ? ';border-color:#dc2626' : ''}"><span>${s.score}</span></div>`, iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -30] }),
-    }).bindPopup(spotPopup(s), { minWidth: 260, maxWidth: 300 });
+      icon: L.divIcon({ className: '', html: `<div class="spot-pin" style="background:${scoreColor(s.score)};color:${scoreFg(s.score)}${s.protected ? ';border-color:#dc2626' : ''}"><span>${s.score}</span></div>`, iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -30] }),
+    }).bindPopup(spotPopup(s), { minWidth: 260, maxWidth: 300, autoPanPaddingTopLeft: [10, 80], autoPanPaddingBottomRight: [10, 110] });
     m.spotId = s.id;
     m.addTo(layers.spots);
   }
@@ -307,12 +317,14 @@ function drawAnalysis(a, fit = false) {
   for (const s of a.fungaie || []) {
     const m = L.marker([s.lat, s.lon], {
       zIndexOffset: 500,
-      icon: L.divIcon({ className: '', html: `<div class="spot-pin fung" style="background:${scoreColor(s.score)}"><span>${s.score}</span></div>`, iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -30] }),
-    }).bindPopup(spotPopup(s), { minWidth: 260, maxWidth: 300 });
+      icon: L.divIcon({ className: '', html: `<div class="spot-pin fung"><span>${s.score}</span></div>`, iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -30] }),
+    }).bindPopup(spotPopup(s), { minWidth: 260, maxWidth: 300, autoPanPaddingTopLeft: [10, 80], autoPanPaddingBottomRight: [10, 110] });
     m.spotId = s.id;
     m.addTo(layers.spots);
   }
-  if (fit && a.spots.length) map.fitBounds(L.latLngBounds(a.spots.map((s) => [s.lat, s.lon])).pad(0.15));
+  // spazio per la barra di ricerca in alto e per il pannello (basso sul telefono, a sinistra sul computer)
+  const pad = innerWidth < 900 ? { paddingTopLeft: [20, 80], paddingBottomRight: [20, 130] } : { paddingTopLeft: [460, 80], paddingBottomRight: [40, 40] };
+  if (fit && a.spots.length) map.fitBounds(L.latLngBounds(a.spots.map((s) => [s.lat, s.lon])), pad);
   else if (fit) map.setView([a.center.lat, a.center.lon], 10);
 }
 
@@ -383,6 +395,7 @@ async function run() {
     state.analysis = a;
     await kv.set('lastAnalysis', a);
     await saveToHistory(a);
+    if (innerWidth < 900) setSheet('peek'); // a calcolo finito si vedono gli spot sulla mappa
     drawAnalysis(a, true);
     renderResults(); renderSpots();
     toast(`${a.spots.length} spot trovati`);
@@ -417,13 +430,12 @@ function zonesCard(a) {
   return `<h3>Zone migliori per un giro</h3>
     ${zs.map((z) => {
       const first = zonePts(z, a)[0];
-      const startTxt = `ad anello da ${z.spots[0]}${z.parking ? `, lo spot più vicino alla strada (~${z.parking.walkMin} min a piedi)` : ''}`;
       const driveTo = z.parking || first;
       return `<div class="card click zone-card" data-zone="${z.id}">
       <div class="row"><span class="pill zone">Zona ${z.id}</span><b class="grow">${z.count} spot${z.fungaie ? ` + ${z.fungaie} fungai${z.fungaie === 1 ? 'a' : 'e'}` : ''} · migliore ${z.best} · media ${z.mean}</b></div>
       <div class="small muted" style="margin-top:4px">Giro: ${z.spots.join(' → ')} → ${z.spots[0]} · ~${fmt1(z.tourKm)} km in linea d'aria</div>
-      <a class="btn primary block" style="margin-top:8px" target="_blank" rel="noopener" data-stop href="${zoneTourUrl(z, a)}">${icon('nav')} Giro a piedi su Mapy.com</a>
-      <div class="small muted" style="margin-top:4px">Percorso su sentieri ${startTxt}, tappe ${z.spots.join(', ')}. In auto fino ${z.parking ? `alla strada più vicina a ${z.spots[0]}` : `a ${z.spots[0]}`}:</div>
+      <a class="btn primary block" style="margin-top:8px" target="_blank" rel="noopener" data-stop href="${zoneTourUrl(z, a)}">${icon('nav')} Giro a piedi su Mapy</a>
+      <div class="small muted" style="margin-top:6px">In auto fino a ${z.spots[0]}:</div>
       <div data-stop>${driveTo ? navButtons(driveTo.lat, driveTo.lon, { small: true }) : ''}</div>
     </div>`;
     }).join('')}`;
@@ -439,11 +451,9 @@ function situationCard(a) {
   const tLabel = t.high || t.maxAnom ? '<span class="pill bad">sopra la media</span>' : t.low ? '<span class="pill ok">medio-bassa</span>' : '<span class="pill">nella media</span>';
   return `<h3>Situazione del bosco</h3>
     <div class="card small">
-      <div style="font-size:16px;font-weight:700;margin-bottom:4px">${REGIMES[main].label}</div>
-      <div>${REGIMES[main].hint}.</div>
-      <div style="margin-top:8px">Temperatura in valle ${fmt1(s.meanT)} °C ${tLabel}<br>
-        <span class="muted">Normale del periodo ${fmt1(c.normal)} °C (${esc(c.source)}, zona ${esc(c.zoneLabel)}) · elevata oltre ${fmt1(c.high)} °C · massime anomale oltre ${fmt1(c.maxAnom)} °C (ora ${fmt1(s.meanMax)} °C)</span></div>
-      <div style="margin-top:6px" class="muted">Spot per situazione (dipende dalla pioggia caduta in ciascuna zona): secco/caldo ${counts.A} · umido/fresco ${counts.B} · intermedia ${counts.C}</div>
+      <div style="font-size:16px;font-weight:800;margin-bottom:2px">${REGIMES[main].label}</div>
+      <div class="muted">${REGIMES[main].hint}</div>
+      <div style="margin-top:8px">Valle ${fmt1(s.meanT)} °C ${tLabel} <span class="muted">· normale ${fmt1(c.normal)} °C</span></div>
       ${soilLine(a)}
     </div>`;
 }
@@ -451,14 +461,8 @@ function situationCard(a) {
 // Umidità del suolo: bilancio pioggia − evaporazione degli ultimi 40 giorni
 function soilLine(a) {
   if (a.summary.soilTheta == null) return '';
-  const sc = { umido: 0, limite: 0, secco: 0 };
-  for (const sp of a.spots) if (sp.soil) sc[sp.soil.cls]++;
   const th = Math.round(a.summary.soilTheta * 100);
-  return `<div style="margin-top:8px"><b>Umidità del suolo</b> (pioggia − evaporazione): in valle ${th}%
-    <span class="pill ${th >= 50 ? 'ok' : th >= 30 ? 'warn' : 'bad'}">${th >= 50 ? 'umido' : th >= 30 ? 'al limite' : 'secco'}</span><br>
-    <span class="muted">Spot: umido ${sc.umido} · al limite ${sc.limite} · secco ${sc.secco}</span></div>
-    ${(() => { const all = [...a.spots, ...(a.fungaie || [])]; const m = all.filter((x) => x.rainSrc?.type === 'pluviometri').length; return all.some((x) => x.rainSrc) ? `<div style="margin-top:6px" class="muted">Pioggia dei giorni passati: <b>misurata dai pluviometri SIR</b> per ${m} spot su ${all.length}${m < all.length ? ', stimata con la media di 3 modelli meteo per gli altri' : ''}.</div>` : ''; })()}
-    <div style="margin-top:8px" class="muted">Voto = Luogo × Suolo<sup>1,2</sup> × Timer<sup>0,8</sup> × Stagione<sup>0,5</sup>, ogni fattore da 0 a 1: 100 solo se sono tutti al massimo.</div>`;
+  return `<div style="margin-top:6px">Suolo in valle ${th}% <span class="pill ${th >= 50 ? 'ok' : th >= 30 ? 'warn' : 'bad'}">${th >= 50 ? 'umido' : th >= 30 ? 'al limite' : 'secco'}</span></div>`;
 }
 
 // Archivio delle analisi (versione leggera, senza immagini) che Sincronizza carica su Drive
@@ -494,16 +498,16 @@ function renderResults() {
     return `<div class="card band" style="--c:${G.color}">
       <div class="small muted">${esc(G.label)}${g.offSeason ? ' · fuori stagione' : g.weight < 1 ? ' · inizio/fine stagione' : ' · piena stagione'}</div>
       <div class="big">${Math.round(g.band.lo)}–${Math.round(g.band.hi)} m</div>
-      <div class="small">Target ${g.band.tMin}–${g.band.tMax} °C al suolo · ${esc(names)}<br><span class="muted">Bosco tipico: ${FORESTS[G.forest].label} (${FORESTS[G.forest].altMin}–${FORESTS[G.forest].altMax} m)</span></div>
+      <div class="small">${esc(names)} · ${g.band.tMin}–${g.band.tMax} °C al suolo</div>
     </div>`;
   }).join('');
   const timerRow = (fk) => {
     const t = a.timers?.[fk];
     if (!t) return `<div><b>${FORESTS[fk].label}</b>: timer non avviato (nessuna pioggia sopra soglia).</div>`;
     const status = a.date < t.firstPossible ? 'in attesa' : a.date < t.from ? 'micelio in attivazione' : a.date <= t.to ? '<span class="pill ok">finestra migliore</span>' : 'finestra in chiusura';
-    return `<div style="margin-bottom:6px"><b>${FORESTS[fk].label}</b> · ${status}<br>Migliore: <b>${itDate(t.from)} → ${itDate(t.to)}</b> <span class="muted">(primi funghi dal ${itDate(t.firstPossible)}${t.where ? `, pioggia caduta nella zona di ${t.where}` : ', pioggia in valle'})</span></div>`;
+    return `<div style="margin-bottom:6px"><b>${FORESTS[fk].label}</b> · ${status}<br>Migliore <b>${itDate(t.from)} → ${itDate(t.to)}</b> <span class="muted">· primi funghi dal ${itDate(t.firstPossible)}</span></div>`;
   };
-  const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}<div class="muted">Il timer parte dalla pioggia più vecchia degli ultimi 20 giorni che arriva a 15 mm (sommando i giorni di pioggia consecutivi) e non riparte con le piogge successive. Tra ${state.settings.rainEventMm} e 15 mm il timer parte comunque, con voto −20%. Ogni spot usa la pioggia caduta nella sua zona.</div></div>`;
+  const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}</div>`;
   const alerts = [];
   {
     const all = [...a.spots, ...(a.fungaie || [])];
@@ -517,10 +521,10 @@ function renderResults() {
     const ne = a.spots.filter((x) => x.nearEmpty).length;
     if (ne) alerts.push(`<div class="alert warn">${ne} spot sono vicini a tue uscite a vuoto recenti: punteggio ridotto (la penalità svanisce in 3 settimane o se torna a piovere).</div>`);
   }
-  if (a.scan?.excludedFar) alerts.push(`<div class="alert ok">Esclusi ${a.scan.excludedFar} spot buoni ma a più di ${a.scan.maxWalk} minuti a piedi dalla strada più vicina (limite modificabile in Opzioni).</div>`);
+  if (a.scan?.excludedFar) alerts.push(`<div class="alert ok small">Esclusi ${a.scan.excludedFar} spot buoni ma a più di ${a.scan.maxWalk} minuti a piedi dalla strada più vicina (limite modificabile in Opzioni).</div>`);
   if (a.fungaie?.length) {
     const top = a.fungaie[0];
-    alerts.push(`<div class="alert ok">Le tue fungaie nel raggio: <b>${a.fungaie.length}</b>, valutate nel punto esatto (segnaposto con bordo marrone). La migliore oggi: <b>${top.id} · ${top.score}/100</b> a ${top.elevation} m. Le trovi in cima alla scheda Spot.</div>`);
+    alerts.push(`<div class="alert ok">Tue fungaie nel raggio: <b>${a.fungaie.length}</b> · la migliore oggi <b>${top.id} · ${top.score}</b></div>`);
   }
   if (a.settings.forestPref && a.settings.forestPref !== 'auto') {
     alerts.push(`<div class="alert ok">Solo boschi di <b>${a.settings.forestPref === 'quercia' ? 'querce e castagni' : 'faggi e abeti'}</b>.${a.spots.length < 5 ? ' Pochi spot: prova “Misto / automatico” o un raggio più ampio.' : ''}</div>`);
@@ -546,7 +550,6 @@ function renderResults() {
       Pioggia giornaliera ultimi 20 giorni (valle)
       <div class="rainbars">${bars}</div>
       <div style="margin-top:6px">${last ? `Pioggia del timer: <b>${itDate(last.end)}</b> (${fmt1(last.total)} mm${last.weak ? ', sotto i 15 mm: voto −20%' : ''}) · <b>${last.daysSince} giorni</b> fa rispetto al giorno scelto` : 'Nessun episodio di pioggia sopra soglia.'}</div>
-      <div class="muted">Quota di partenza: ${a.valleyElev} m · gradiente ${a.settings.gradient.toFixed(2).replace('.', ',')} °C/100 m</div>
     </div>
     ${alerts.join('')}
     ${zonesCard(a)}
@@ -555,9 +558,7 @@ function renderResults() {
     ${groups}
     <h3>Timer del micelio</h3>
     ${timerCard}
-    <div class="legend"><span><i style="background:#16a34a"></i>idoneo autunnale</span><span><i style="background:#ea580c"></i>idoneo estivo</span><span><i style="background:#facc15"></i>marginale</span><span><i style="border:2px solid #dc2626"></i>area protetta</span></div>
     ${learnN ? `<p class="small muted">Regole affinate con ${learnN} ritrovament${learnN === 1 ? 'o' : 'i'} tuoi.</p>` : ''}
-    <p class="small muted">Riscontri di altri cercatori: <a href="https://funghimagazine.it/" target="_blank" rel="noopener">aggiornamenti nascite su Funghimagazine</a>.</p>
     <h3>Esporta</h3>
     <div class="btn-row">
       <button class="btn primary" id="gpxBtn">${icon('download')} GPX per Mapy</button>
@@ -585,13 +586,10 @@ function renderSpots() {
   }
   const card = (s) => `
     <div class="card click spot${s.fungaia ? ' fung' : ''}" data-id="${s.id}">
-      <div class="score" style="background:${scoreColor(s.score)}">${s.score}</div>
+      <div class="score" style="background:${scoreColor(s.score)};color:${scoreFg(s.score)}">${s.score}</div>
       <div>
-        <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.zone ? `<span class="pill zone">Zona ${s.zone}</span> ` : ''}${s.fungaia ? `<span class="pill ok">la tua fungaia · ${s.nPos}×</span>` : s.nearFind ? '<span class="pill ok">vicino a una tua fungaia</span>' : ''}</div>
-        <div class="m">${esc(s.forest)}${s.edge ? ' · margine' : ''} · pendenza ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km</div>
-        <div class="m">T suolo ${fmt1(s.tLocal)} °C · luogo ${s.place} · tempismo ${s.timing}${s.daysSince != null ? ` · ${s.daysSince} gg da pioggia` : ''}</div>
-        ${s.access ? `<div class="m">${accessText(s.access)}</div>` : ''}
-        ${s.regime ? `<div class="m">${REGIMES[s.regime].label} · pioggia 20 gg ${s.rainTotal} mm${s.soil ? ` · ${esc(s.soil.label.toLowerCase())} (${s.soil.theta}%)` : ''}</div>` : ''}
+        <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.zone ? `<span class="pill zone">Zona ${s.zone}</span> ` : ''}${s.fungaia ? `<span class="pill ok">tua fungaia</span>` : ''}</div>
+        <div class="m">${esc(s.forest)} · ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km${s.access ? ` · strada ${s.access.walkMin} min` : ''}</div>
         ${s.protected ? `<div class="m" style="color:var(--danger)">${s.protected.strict ? 'Riserva integrale' : 'Area protetta'}: ${esc(s.protected.name)}</div>` : ''}
         ${s.killers.length ? `<div class="m" style="color:var(--warn)">Timer fermo: ${s.killers.join(', ')}</div>` : ''}
       </div>
@@ -1057,6 +1055,7 @@ function drawCar() {
   layers.car.clearLayers(); carLine = null;
   const c = state.car;
   $('#carBtn').classList.toggle('on', !!c);
+  $('#posBtn').classList.toggle('car', !!c);
   if (!c) return;
   L.marker([c.lat, c.lon], {
     icon: L.divIcon({ className: '', html: `<div class="car-pin">${icon('car')}</div>`, iconSize: [34, 34], iconAnchor: [17, 17] }),
@@ -1206,16 +1205,21 @@ function bindUI() {
     const st = $('#panel').dataset.state;
     setSheet(st === 'peek' ? 'half' : st === 'half' ? 'full' : 'peek');
   };
-  $('#carBtn').innerHTML = icon('car');
-  $('#carBtn').onclick = openCar;
+  // un solo pulsante sulla mappa: apre "La mia posizione / La mia auto"
+  const posMenu = (open) => { $('#posMenu').hidden = !open; $('#posBtn').setAttribute('aria-expanded', open); };
+  $('#posBtn').innerHTML = icon('crosshair');
+  $('#posBtn').onclick = (e) => { e.stopPropagation(); posMenu($('#posMenu').hidden); };
+  document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.map-ctrls')) posMenu(false); });
+  $('#carBtn').innerHTML = `${icon('car')} La mia auto`;
+  $('#carBtn').onclick = () => { posMenu(false); openCar(); };
   $('#carClose').innerHTML = icon('x');
   $('#carClose').onclick = () => $('#carDlg').close();
   $('#carDlg').addEventListener('close', stopCarTracking);
-  $('#locateBtn').innerHTML = icon('crosshair');
-  $('#locateBtn').onclick = () => { state.start = null; locate({ center: true }); };
+  $('#locateBtn').innerHTML = `${icon('crosshair')} La mia posizione`;
+  $('#locateBtn').onclick = () => { posMenu(false); state.start = null; locate({ center: true }); };
   $('#usePosBtn').innerHTML = icon('crosshair');
   $('#usePosBtn').onclick = () => { state.start = null; locate({ center: true }); };
-  $('#fabFind').innerHTML = `${icon('plus')} Fungaia`;
+  $('#fabFind').innerHTML = icon('plus');
   $('#fabFind').onclick = () => openFindForm();
   $('#newFindBtn').innerHTML = `${icon('plus')} Nuova fungaia`;
   $('#newFindBtn').onclick = () => openFindForm();
@@ -1299,7 +1303,7 @@ async function init() {
   bindUI();
   renderControls();
   renderSyncStatus();
-  if (innerWidth < 900) setSheet('half');
+  if (innerWidth < 900) setSheet('peek'); // la mappa resta protagonista: il pannello si apre toccando una scheda
 
   const lastGps = await kv.get('lastGps');
   if (lastGps) { state.gps = lastGps; state.start = { lat: lastGps.lat, lon: lastGps.lon, manual: false }; map.setView([lastGps.lat, lastGps.lon], 10); }

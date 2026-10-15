@@ -1,5 +1,5 @@
 // Service worker: app disponibile offline + cache delle mappe e dell'altimetria
-const SHELL = 'cp-shell-v39';
+const SHELL = 'cp-shell-v40';
 // solo risposte CORS: le risposte "opache" Chrome le conta ~7 MB l'una e satura lo spazio del sito
 const TILES = 'cp-tiles-v2';
 const FILES = [
@@ -11,7 +11,8 @@ const FILES = [
   'vendor/leaflet/images/layers.png', 'vendor/leaflet/images/layers-2x.png',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png',
 ];
-const TILE_HOSTS = ['tile.opentopomap.org', 'tile.openstreetmap.org', 'server.arcgisonline.com', 'elevation-tiles-prod'];
+// mappe, altimetria e font (Google Fonts): prima la cache, così funzionano anche offline
+const TILE_HOSTS = ['tile.opentopomap.org', 'tile.openstreetmap.org', 'server.arcgisonline.com', 'elevation-tiles-prod', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));

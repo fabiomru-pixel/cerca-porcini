@@ -5,17 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Cerca Porcini</title>
   <meta name="description" content="Dove e quando cercare i porcini: gradiente termico, pioggia, timer del micelio e microclima.">
-  <meta name="theme-color" content="#2f6d3c">
+  <meta name="theme-color" content="#E4FDE1">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Darumadrop+One&family=Nunito:wght@400;600;700;800&display=swap">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="css/app.css">
   <script>
     try { const t = localStorage.getItem('cp-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
   </script>
 </head>
-<body data-sheet="half">
+<body data-sheet="peek">
   <header class="appbar">
     <div class="brand"><img src="icons/icon-192.png" alt=""><span>Cerca Porcini</span></div>
     <div class="spacer"></div>
@@ -33,12 +36,15 @@
   </div>
 
   <div class="map-ctrls">
-    <button class="icon-btn" id="carBtn" title="La mia auto" aria-label="La mia auto"></button>
-    <button class="icon-btn" id="locateBtn" title="La mia posizione" aria-label="La mia posizione"></button>
+    <div class="pos-menu" id="posMenu" hidden>
+      <button class="btn" id="locateBtn"></button>
+      <button class="btn" id="carBtn"></button>
+    </div>
+    <button class="icon-btn" id="posBtn" title="Posizione e auto" aria-label="Posizione e auto" aria-expanded="false"></button>
   </div>
-  <button class="fab" id="fabFind"></button>
+  <button class="fab" id="fabFind" title="Nuova fungaia" aria-label="Nuova fungaia"></button>
 
-  <aside class="panel" id="panel" data-state="half">
+  <aside class="panel" id="panel" data-state="peek">
     <button class="sheet-handle" id="sheetHandle" aria-label="Espandi o riduci il pannello"></button>
     <nav class="tabs" role="tablist">
       <button class="tab" role="tab" data-tab="analisi" aria-selected="true"></button>
@@ -52,12 +58,11 @@
       <div class="card">
         <div class="row">
           <div class="grow">
-            <div class="label">Posizione di partenza (valle di riferimento)</div>
+            <div class="label">Punto di partenza</div>
             <div id="posText" class="small">In attesa del GPS…</div>
           </div>
           <button class="btn" id="usePosBtn" title="Usa la posizione GPS"></button>
         </div>
-        <div class="small muted" style="margin-top:6px">Puoi anche tenere premuto sulla mappa per scegliere un altro punto di partenza.</div>
       </div>
 
       <div class="field">
