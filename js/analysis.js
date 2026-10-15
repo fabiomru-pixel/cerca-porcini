@@ -1,8 +1,8 @@
 // Analisi completa: meteo + altimetria + bosco + regole -> mappa di idoneità e spot consigliati
-import { GROUPS, FORESTS, SPECIES } from './config.js';
+import { GROUPS, FORESTS, SPECIES, BUILT_MIN_M } from './config.js';
 import { loadMosaic, terrainAtPoint } from './dem.js';
 import { fetchDaily } from './weather.js';
-import { forestRaster, forestPatch, fetchProtected, protectedAt } from './sources.js';
+import { forestRaster, forestPatch, fetchProtected, protectedAt, builtRaster, nearBuiltGrid } from './sources.js';
 import { distKm, bboxAround, aspectLabel, metersPerPixel, ASPECT_DEG, angDiff } from './geo.js';
 import { contourLines } from './contours.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
@@ -71,6 +71,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const radius = s.radiusKm;
   const center = { lat, lon };
   const aspectTarget = s.aspectPref && s.aspectPref !== 'auto' ? ASPECT_DEG[s.aspectPref] : null;
+  // tipo di bosco scelto (querce/castagni o faggi/abeti); "auto" = tutti
+  const forestPref = s.forestPref === 'quercia' || s.forestPref === 'faggio' ? s.forestPref : null;
   const ahead = daysBetween(todayStr(), date);
   if (ahead > 15) throw new Error('La data può essere al massimo 15 giorni avanti (limite delle previsioni).');
   if (ahead < -60) throw new Error('La data non può essere più di 60 giorni fa.');
@@ -126,6 +128,14 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       forest.code[y * OW + x] = b + c === 0 ? 0 : b >= c ? 1 : 2;
     }
   } catch (e) { console.warn('forest raster', e); forest = null; }
+
+  // case e paesi: celle con un edificio entro BUILT_MIN_M escluse (riserva: senza la carta non escludo niente)
+  let builtNear = null;
+  try {
+    const b = await builtRaster(mosaic.z, mosaic.ox, mosaic.oy, mosaic.ox + OW * stride, mosaic.oy + OH * stride, OW * 2, OH * 2);
+    const cellM = metersPerPixel(lat, mosaic.z) * stride;
+    builtNear = nearBuiltGrid(b, OW, OH, Math.max(0, Math.round(BUILT_MIN_M / cellM)));
+  } catch (e) { console.warn('built raster', e); builtNear = null; }
 
   onStep('Scarico il meteo in quota…', 0.45);
   const grid = weatherGrid(lat, lon, radius);
@@ -196,6 +206,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     for (let ox = 0; ox < OW; ox++) {
       const k = oy * OW + ox;
       if (forest && forest.frac[k] < 0.5) continue; // fuori dal bosco
+      if (builtNear && builtNear[k]) continue;      // troppo vicino a case e paesi
       const px = ox * stride;
       const ll = { lat: rowLat, lon: mosaic.toLatLon(px, py).lon };
       if (distKm(center, ll) > radius) continue;
@@ -204,6 +215,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const { slope, aspect } = mosaic.slopeAspectPx(px, py, saStep);
       if (aspectTarget != null && (slope < 3 || angDiff(aspect, aspectTarget) > 30)) continue; // esposizione scelta
       const fk = userForest(ll) || cellForestKey(elevation, forest?.code[k]);
+      if (forestPref && fk !== forestPref) continue; // tipo di bosco scelto
       const w = nearestWeather(grid, byIJ, ll.lat, ll.lon, center);
       const tm = w.timing[fk];
       let bonus = edgeAt(ox, oy);
@@ -230,6 +242,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   // valutazione di un punto (usata nella scansione fine)
   const scoreCell = (ll, elevation, slope, aspect, code, edgeBonus, areaW, wet) => {
     const fk = userForest(ll) || cellForestKey(elevation, code);
+    if (forestPref && fk !== forestPref) return { fk, fin: 0, pl: { score: 0 }, tm: null, g: groups[0] };
     const w = areaW || nearestWeather(grid, byIJ, ll.lat, ll.lon, center);
     const tm = w.timing[fk];
     let bonus = edgeBonus;
@@ -265,6 +278,11 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         codes[y * FW + x] = b + cf === 0 ? 0 : b >= cf ? 1 : 2;
       }
     } catch { /* senza carta dei boschi di dettaglio: tengo il giudizio della prima passata */ }
+    let builtF = null;
+    try {
+      const b = await builtRaster(m.z, m.ox, m.oy, m.ox + FW * st, m.oy + FH * st, FW * 2, FH * 2);
+      builtF = nearBuiltGrid(b, FW, FH, Math.max(1, Math.round(BUILT_MIN_M / (mppF * st))));
+    } catch { builtF = null; }
     const saF = Math.max(1, Math.round(45 / mppF));
     const wetL = wetness(m); // sul terreno di dettaglio (~7 km attorno all'area: bacini completi)
     const cells = [];
@@ -275,6 +293,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         if (distKm(c, ll) > R || distKm(center, ll) > radius) continue;
         const k = fy * FW + fx;
         if (frac && frac[k] < 0.5) continue;
+        if (builtF && builtF[k]) continue; // case e paesi
         const elevation = m.at(px, py);
         if (elevation < 50 || elevation > 2100) continue;
         const { slope, aspect } = m.slopeAspectPx(px, py, saF);
@@ -292,6 +311,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
           if (mfr > 0.35 && mfr < 0.85) edge = 1.08;
         }
         const r = scoreCell(ll, elevation, slope, aspect, codes ? codes[k] : c.code, edge, c.w, wetL.at(ll.lat, ll.lon));
+        if (!(r.fin > 0)) continue; // bosco diverso da quello scelto
         cells.push({ lat: ll.lat, lon: ll.lon, elevation, slope, aspect, code: codes ? codes[k] : c.code, fine: true, w: c.w, ...r });
       }
     }
@@ -381,6 +401,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const w = atPoint(c.w || nearestWeather(grid, byIJ, c.lat, c.lon, center), c.lat, c.lon);
       const code = c.patch ? (c.patch.frac === 0 ? 0 : c.patch.broad >= c.patch.conif ? 1 : 2) : c.code;
       const fk = userForest(c) || cellForestKey(c.elevation, code);
+      if (forestPref && fk !== forestPref) return null;
       const tm = evalTiming(w, date, s, fk, c.elevation, learn);
       // suolo secco conta come "piogge scarse" anche se nei 20 giorni è caduta la quantità minima
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
@@ -435,6 +456,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         regime,
       };
     })
+    .filter(Boolean)
     .sort((a, b) => b.score - a.score);
 
   // Raggiungibilità: strada percorribile in auto più vicina e minuti a piedi. Oltre il limite lo spot
@@ -605,7 +627,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   return {
     createdAt: new Date().toISOString(),
     date, center, radius, valleyElev,
-    settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto' },
+    settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto', forestPref: s.forestPref || 'auto' },
     summary, groups, timers, spots: final, fungaie, zones, overlay, contours,
     scan: { areas: areas.length, fine: true, excludedFar, maxWalk },
     protectedFc, forestChecked: !!forest, demZoom: mosaic.z,

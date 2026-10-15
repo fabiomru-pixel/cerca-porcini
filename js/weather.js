@@ -75,12 +75,13 @@ export async function fetchDaily(points, { pastDays = 30, forecastDays = 16, onW
     let res;
     for (let attempt = 0; ; attempt++) {
       res = await fetch(`${FORECAST}?${p}`);
-      if (res.status !== 429 || attempt >= 4) break;
+      // 429 = troppe richieste, 502/503/504 = servizio sovraccarico: aspetto e riprovo
+      if (![429, 502, 503, 504].includes(res.status) || attempt >= 4) break;
       const wait = 20 * (attempt + 1);
       onWait?.(wait);
       await sleep(wait * 1000);
     }
-    if (!res.ok) throw new Error(res.status === 429 ? 'Open-Meteo: troppe richieste in poco tempo, riprova tra qualche minuto' : `Open-Meteo: ${res.status}`);
+    if (!res.ok) throw new Error(res.status === 429 ? 'Open-Meteo: troppe richieste in poco tempo, riprova tra qualche minuto' : res.status >= 502 ? 'Open-Meteo è sovraccarico in questo momento: riprova tra qualche minuto' : `Open-Meteo: ${res.status}`);
     let j = await res.json();
     if (!Array.isArray(j)) j = [j];
     j.forEach((r, n) => {

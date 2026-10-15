@@ -1,5 +1,5 @@
 // Fonti esterne: bosco (Copernicus HRL Forest Type, 10 m) e aree protette (EEA – elenco ufficiale EUAP)
-import { FOREST_TYPE_URL, EEA_PROTECTED_URL } from './config.js';
+import { FOREST_TYPE_URL, EEA_PROTECTED_URL, BUILT_UP_URL } from './config.js';
 import { pointInPolygon, lon2px, lat2px } from './geo.js';
 
 const HALF = 20037508.342789244;
@@ -33,6 +33,45 @@ async function exportForest(x0, y0, x1, y1, w, h) {
 export async function forestRaster(z, px0, py0, px1, py1, w, h) {
   const codes = await exportForest(pxToM(px0, z), pyToM(py1, z), pxToM(px1, z), pyToM(py0, z), w, h);
   return { w, h, codes };
+}
+
+// Edifici e superfici costruite (Copernicus Built-Up 2018): 1 = costruito, 0 = no. Stessa griglia di forestRaster.
+export async function builtRaster(z, px0, py0, px1, py1, w, h) {
+  const p = new URLSearchParams({
+    bbox: `${pxToM(px0, z)},${pyToM(py1, z)},${pxToM(px1, z)},${pyToM(py0, z)}`, bboxSR: '3857', imageSR: '3857',
+    size: `${w},${h}`, format: 'png', interpolation: 'RSP_NearestNeighbor', f: 'image',
+  });
+  const res = await fetch(`${BUILT_UP_URL}?${p}`);
+  if (!res.ok) throw new Error(`Carta degli edifici: ${res.status}`);
+  const bmp = await createImageBitmap(await res.blob());
+  const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const mask = new Uint8Array(w * h);
+  for (let i = 0; i < mask.length; i++) if (d[i * 4 + 3] >= 128) mask[i] = 1;
+  return { w, h, mask };
+}
+
+// Celle (gw×gh) che hanno un edificio entro rCells celle: il raster a 2× viene ridotto e poi "allargato"
+export function nearBuiltGrid(b, gw, gh, rCells) {
+  const cell = new Uint8Array(gw * gh);
+  const sx = b.w / gw, sy = b.h / gh;
+  for (let y = 0; y < b.h; y++) for (let x = 0; x < b.w; x++) {
+    if (b.mask[y * b.w + x]) cell[Math.min(gh - 1, (y / sy) | 0) * gw + Math.min(gw - 1, (x / sx) | 0)] = 1;
+  }
+  if (rCells <= 0) return cell;
+  const out = new Uint8Array(gw * gh);
+  const r2 = rCells * rCells;
+  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+    if (!cell[y * gw + x]) continue;
+    for (let dy = -rCells; dy <= rCells; dy++) for (let dx = -rCells; dx <= rCells; dx++) {
+      if (dx * dx + dy * dy > r2) continue;
+      const xx = x + dx, yy = y + dy;
+      if (xx >= 0 && yy >= 0 && xx < gw && yy < gh) out[yy * gw + xx] = 1;
+    }
+  }
+  return out;
 }
 
 // Intorno di un punto (~r metri): frazione di bosco, tipo dominante, margine

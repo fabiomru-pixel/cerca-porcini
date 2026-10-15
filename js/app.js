@@ -359,6 +359,7 @@ function renderControls() {
   $('#radius').value = r; $('#radiusVal').textContent = `${r} km`;
   $('#species').value = s.species;
   $('#aspectPref').value = s.aspectPref || 'auto';
+  $('#forestPref').value = s.forestPref || 'auto';
   $('#windowDays').value = s.windowDays; $('#windowDaysVal').textContent = `${s.windowDays} gg`;
   $('#gradient').value = s.gradient; $('#gradientVal').textContent = s.gradient.toFixed(2).replace('.', ',');
   for (const k of ['rainMinMm', 'rainEventMm', 'southOffsetM', 'maxSpots', 'maxWalkMin']) $('#' + k).value = s[k];
@@ -464,7 +465,7 @@ function soilLine(a) {
 async function saveToHistory(a) {
   const light = {
     id: a.createdAt, createdAt: a.createdAt, date: a.date, center: a.center, radius: a.radius, valleyElev: a.valleyElev,
-    settings: { ...a.settings, aspectPref: state.settings.aspectPref, maxWalkMin: state.settings.maxWalkMin, species: state.settings.species },
+    settings: { ...a.settings, aspectPref: state.settings.aspectPref, forestPref: state.settings.forestPref, maxWalkMin: state.settings.maxWalkMin, species: state.settings.species },
     summary: { meanT: a.summary.meanT, meanMax: a.summary.meanMax, meanMin: a.summary.meanMin, rainTotal: a.summary.rainTotal, soilTheta: a.summary.soilTheta, lastEpisode: a.summary.lastEpisode, timerEpisode: a.summary.timerEpisode },
     clim: a.clim, tc: a.tc, timers: a.timers, scan: a.scan,
     groups: a.groups.map((g) => ({ key: g.key, species: g.species, band: g.band })),
@@ -520,6 +521,9 @@ function renderResults() {
   if (a.fungaie?.length) {
     const top = a.fungaie[0];
     alerts.push(`<div class="alert ok">Le tue fungaie nel raggio: <b>${a.fungaie.length}</b>, valutate nel punto esatto (segnaposto con bordo marrone). La migliore oggi: <b>${top.id} · ${top.score}/100</b> a ${top.elevation} m. Le trovi in cima alla scheda Spot.</div>`);
+  }
+  if (a.settings.forestPref && a.settings.forestPref !== 'auto') {
+    alerts.push(`<div class="alert ok">Solo boschi di <b>${a.settings.forestPref === 'quercia' ? 'querce e castagni' : 'faggi e abeti'}</b>.${a.spots.length < 5 ? ' Pochi spot: prova “Misto / automatico” o un raggio più ampio.' : ''}</div>`);
   }
   if (a.settings.aspectPref && a.settings.aspectPref !== 'auto') {
     alerts.push(`<div class="alert ok">Solo versanti esposti a <b>${ASPECT_NAME[a.settings.aspectPref]}</b> (tolleranza circa ±35°, esclusi i tratti pianeggianti).${a.spots.length < 5 ? ' Pochi spot: prova “Automatica” o un raggio più ampio.' : ''}</div>`);
@@ -1239,6 +1243,7 @@ function bindUI() {
   $('#radius').onchange = (e) => { saveSettings({ radiusKm: Number(e.target.value) }); };
   $('#species').onchange = (e) => saveSettings({ species: e.target.value });
   $('#aspectPref').onchange = (e) => saveSettings({ aspectPref: e.target.value });
+  $('#forestPref').onchange = (e) => saveSettings({ forestPref: e.target.value });
   $('#windowDays').oninput = (e) => { $('#windowDaysVal').textContent = `${e.target.value} gg`; saveSettings({ windowDays: Number(e.target.value) }); };
   $('#gradient').oninput = (e) => { $('#gradientVal').textContent = Number(e.target.value).toFixed(2).replace('.', ','); saveSettings({ gradient: Number(e.target.value) }); };
   for (const k of ['rainMinMm', 'rainEventMm', 'southOffsetM', 'maxSpots', 'maxWalkMin']) {
