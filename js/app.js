@@ -63,6 +63,8 @@ function applyTheme(t) {
   $('#themeBtn').innerHTML = icon(t === 'auto' ? 'auto' : dark ? 'moon' : 'sun');
   $$('#themeSeg button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.v === t));
   document.querySelector('meta[name="theme-color"]').content = dark ? '#3a3a41' : '#E4FDE1';
+  // app Android: icone della barra di stato chiare sul tema scuro, scure sul tema chiaro
+  if (NATIVE) window.Capacitor?.Plugins?.SystemBars?.setStyle?.({ style: dark ? 'DARK' : 'LIGHT' }).catch?.(() => {});
 }
 
 // ---------------------------------------------------------------- mappa
