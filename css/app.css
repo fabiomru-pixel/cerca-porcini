@@ -301,3 +301,6 @@ ol.steps li { margin-bottom: 4px; }
 .pop-more summary { cursor: pointer; color: var(--primary-text); font-weight: 700; padding: 4px 0; }
 .pop-more > div { margin: 3px 0; color: var(--muted); }
 .pill.ok { color: var(--ok); }
+
+/* menu dei livelli aperto: la barra di ricerca si toglie di mezzo */
+body.layers-open .search { display: none; }

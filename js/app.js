@@ -84,6 +84,10 @@ function initMap() {
     'Spot consigliati': layers.spots,
     'Le mie fungaie': layers.finds,
   }, { position: 'topright' }).addTo(map);
+  // il menu dei livelli vive dentro la mappa e finirebbe sotto la barra di ricerca: mentre è aperto la nascondo
+  const lc = document.querySelector('.leaflet-control-layers');
+  if (lc) new MutationObserver(() => document.body.classList.toggle('layers-open', lc.classList.contains('leaflet-control-layers-expanded')))
+    .observe(lc, { attributes: true, attributeFilter: ['class'] });
   map.on('popupopen', (e) => {
     const b = e.popup.getElement()?.querySelector('[data-open-place]');
     if (b) b.onclick = () => { map.closePopup(); openView(b.dataset.openPlace); };
