@@ -1,7 +1,7 @@
 // Regole di base (dalle slide) e parametri predefiniti.
 // Tutto ciò che è "regolabile" finisce nelle impostazioni utente (db 'settings').
 
-export const APP_VERSION = '1.21.2';
+export const APP_VERSION = '1.22.0';
 
 export const DEFAULT_SETTINGS = {
   gradient: 0.6,          // °C ogni 100 m (regolabile 0,6–0,7)
@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS = {
   species: 'auto',        // auto | aestivalis | aereus | edulis | pinophilus
   aspectPref: 'auto',     // auto | N | NE | E | SE | S | SO | O | NO
   forestPref: 'auto',     // auto (misto) | quercia | faggio
+  navVoice: true,         // guida a piedi: indicazioni a voce (false = solo vibrazione)
   southOffsetM: 175,      // versante Sud percepito 150–200 m più in basso
   maxSpots: 25,
   maxWalkMin: 40,         // oltre questi minuti a piedi dalla strada lo spot non conta

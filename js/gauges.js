@@ -5,6 +5,7 @@
 // mediana giornaliera delle 3 più vicine. Dove non ci sono stazioni resta la media dei modelli.
 import { distKm } from './geo.js';
 import { SIR_PROXY_URL } from './config.js';
+import { dataUrl } from './platform.js';
 
 const MAX_KM = 12;
 const MAX_AGE_DAYS = 3;
@@ -18,7 +19,7 @@ function loadBase() {
   if (!baseP) {
     baseP = (async () => {
       try {
-        const r = await fetch('data/pluviometri.json', { cache: 'no-cache' });
+        const r = await fetch(dataUrl('data/pluviometri.json'), { cache: 'no-cache' });
         return r.ok ? await r.json() : null;
       } catch { return null; }
     })();

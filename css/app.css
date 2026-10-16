@@ -304,3 +304,26 @@ ol.steps li { margin-bottom: 4px; }
 
 /* menu dei livelli aperto: la barra di ricerca si toglie di mezzo */
 body.layers-open .search { display: none; }
+
+/* ---------- Guida a piedi ---------- */
+.navbar { position: fixed; top: calc(var(--appbar-h) + 8px); left: 10px; right: 10px; z-index: 1060; background: var(--surface); color: var(--text);
+  border-radius: 18px; box-shadow: var(--shadow); padding: 10px 12px; max-width: 520px; margin: 0 auto; }
+@media (min-width: 900px) { .navbar { left: calc(var(--panel-w) + 24px); right: 24px; margin: 0; } }
+body.nav-on .search { display: none; }
+.nav-main { display: flex; align-items: center; gap: 12px; }
+.nav-turn { width: 52px; height: 52px; border-radius: 14px; background: var(--teal); color: #fff; display: grid; place-items: center; flex: none; }
+.nav-turn svg.i { width: 32px; height: 32px; stroke-width: 2.4; }
+.nav-turn.off { background: var(--danger); }
+.nav-instr { font-weight: 800; font-size: 18px; line-height: 1.2; }
+.nav-sub { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+.nav-sub b { color: var(--text); font-family: var(--font-display); font-weight: 400; font-size: 17px; }
+.nav-btns { display: flex; gap: 6px; margin-top: 8px; }
+.nav-btns .btn { flex: 1; padding: 8px 6px; font-size: 13px; }
+.nav-btns .btn.stop { color: var(--danger); }
+.out-card .t { font-weight: 800; }
+.out-card .m { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.out-sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0 12px; }
+.out-sum div { background: var(--surface-2); border-radius: 12px; padding: 8px; text-align: center; }
+.out-sum b { display: block; font-family: var(--font-display); font-weight: 400; font-size: 22px; color: var(--primary-text); }
+.out-sum span { font-size: 12px; color: var(--muted); }
+#outDlg form { padding: 16px; }

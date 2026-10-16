@@ -19,6 +19,14 @@ const P = {
   play: '<path d="M6 4l14 8-14 8z"/>',
   offline: '<path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5.2-2.8M19 13a10 10 0 0 0-2-1.6M2 8.8a15 15 0 0 1 4.2-2.6M22 8.8A15 15 0 0 0 11 5"/>',
   nav: '<path d="M3 11l18-8-8 18-2-8z"/>',
+  walk: '<circle cx="13" cy="4" r="2"/><path d="M10 21l2-6 2.5 2.5V21M8 12l2.5-4.5L14 9l2.5 3M10.5 7.5 9 14"/>',
+  volume: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/>',
+  vibrate: '<rect x="8" y="3" width="8" height="18" rx="2"/><path d="M4 8v8M20 8v8M1.5 10v4M22.5 10v4"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  skip: '<path d="M5 5l9 7-9 7zM17 5v14"/>',
+  left: '<path d="M14 19V9a3 3 0 0 0-3-3H5M9 2 5 6l4 4"/>',
+  right: '<path d="M10 19V9a3 3 0 0 1 3-3h6M15 2l4 4-4 4"/>',
+  up: '<path d="M12 20V4M6 10l6-6 6 6"/>',
   // auto stilizzata vista di lato (hatchback)
   car: '<path d="M4.2 17H2.7c-.4 0-.7-.3-.7-.7V8.6C2 7.7 2.7 7 3.6 7h9.2c.6 0 1.2.3 1.6.7l3.3 3.3 2.4.6c.8.2 1.4 1 1.4 1.8v2.9c0 .4-.3.7-.7.7h-1.5"/><path d="M8.4 17h2.2M12.3 17h.3M13.9 17h1.2"/><circle cx="6.3" cy="17" r="2.1"/><circle cx="17.2" cy="17" r="2.1"/><path d="M4.6 9h5.3v2.1H4.6zM11.4 9h1.5l2.1 2.1h-3.6z"/><path d="M7.6 13h1.2M20.4 13.4h.4"/>',
 };

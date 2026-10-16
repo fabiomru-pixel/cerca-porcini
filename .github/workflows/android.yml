@@ -1,0 +1,87 @@
+name: App Android
+
+# Costruisce l'app Android (Capacitor) dagli stessi file della versione web e la pubblica come file APK
+# nella release "android-latest" del repository: dal telefono si scarica e si installa da lì.
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - index.html
+      - css/**
+      - js/**
+      - icons/**
+      - vendor/**
+      - capacitor.config.json
+      - package.json
+      - scripts/build-www.mjs
+      - scripts/android-patch.mjs
+      - .github/workflows/android.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # chiave di firma fissa: senza, ogni versione avrebbe una firma diversa e il telefono non la aggiornerebbe.
+      # Generata al primo giro e salvata nel repository (va bene per installare a mano; per il Play Store servirà una chiave privata).
+      - name: Chiave di firma
+        run: |
+          mkdir -p android-signing ~/.android
+          if [ ! -f android-signing/debug.keystore ]; then
+            keytool -genkeypair -v -keystore android-signing/debug.keystore -storepass android -alias androiddebugkey \
+              -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Cerca Porcini,O=Cerca Porcini,C=IT"
+            git config user.name "android-bot"
+            git config user.email "fabiomru-pixel@users.noreply.github.com"
+            git add android-signing/debug.keystore
+            git commit -m "Chiave di firma per l'app Android"
+            git pull --rebase && git push
+          fi
+          cp android-signing/debug.keystore ~/.android/debug.keystore
+
+      - name: Prepara il progetto Android
+        run: |
+          npm install --no-audit --no-fund
+          npm run build:www
+          npx cap add android
+          node scripts/android-patch.mjs
+          npx cap sync android
+
+      - name: Compila l'APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon -q 2>&1 | tee ../gradle.log
+          test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Errori di compilazione
+        if: failure()
+        run: |
+          [ -f gradle.log ] && grep -iE "error|failed|exception" gradle.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done || true
+
+      - name: Pubblica l'APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk CercaPorcini.apk
+          VERSION=$(grep -oP "APP_VERSION = '\K[^']+" js/config.js)
+          gh release delete android-latest -y --cleanup-tag || true
+          gh release create android-latest CercaPorcini.apk --prerelease \
+            --title "Cerca Porcini per Android $VERSION" \
+            --notes "Versione $VERSION (compilazione ${{ github.run_number }}). Dal telefono: scarica CercaPorcini.apk e aprilo per installarlo."

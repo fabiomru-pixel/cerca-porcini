@@ -28,6 +28,9 @@
 
   <div id="map"></div>
 
+  <div class="navbar" id="navBar" hidden></div>
+  <dialog id="outDlg"><form method="dialog" id="outForm"></form></dialog>
+
   <div class="search" id="search">
     <span id="searchIco"></span>
     <input id="searchInput" type="search" placeholder="Cerca un luogo (es. Prunetta)" autocomplete="off" enterkeyhint="search" aria-label="Cerca un luogo">
@@ -50,6 +53,7 @@
       <button class="tab" role="tab" data-tab="analisi" aria-selected="true"></button>
       <button class="tab" role="tab" data-tab="spot"></button>
       <button class="tab" role="tab" data-tab="fungaie"></button>
+      <button class="tab" role="tab" data-tab="giri"></button>
       <button class="tab" role="tab" data-tab="impostazioni"></button>
     </nav>
 
@@ -143,6 +147,11 @@
       <div id="findList"></div>
     </section>
 
+    <!-- GIRI: riepiloghi delle uscite con la guida a piedi -->
+    <section class="tab-body" data-body="giri" hidden>
+      <div id="outingList"></div>
+    </section>
+
     <!-- IMPOSTAZIONI -->
     <section class="tab-body" data-body="impostazioni" hidden>
       <h2>Impostazioni</h2>
@@ -150,6 +159,13 @@
         <span class="label">Tema</span>
         <div class="seg" id="themeSeg">
           <button data-v="auto">Automatico</button><button data-v="light">Chiaro</button><button data-v="dark">Scuro</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label">Guida a piedi</span>
+        <div class="seg" id="voiceSeg">
+          <button data-v="1">Voce e vibrazione</button><button data-v="0">Solo vibrazione</button>
         </div>
       </div>
 
