@@ -5,7 +5,7 @@ import { terrainAtPoint } from './dem.js';
 import { temperatureAt, fetchDaily, fetchDailyArchive } from './weather.js';
 import { aspectLabel } from './geo.js';
 import { SPECIES, GROUPS } from './config.js';
-import { rainEpisodes, timerRain, RAIN_FULL_MM, airMoisture, windLoad, forestByElevation, forestTempOffset, soilMoisture, forestTimer, addDays } from './engine.js';
+import { rainEpisodes, timerRain, timerState, RAIN_FULL_MM, airMoisture, windLoad, forestByElevation, forestTempOffset, soilMoisture, forestTimer, addDays } from './engine.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
 import { loadGauges, applyGauges } from './gauges.js';
 
@@ -220,7 +220,8 @@ async function dailyAround(lat, lon, date, before = 45) {
 //     il giorno dopo un temporale insegnava che i porcini nascono in 1 giorno)
 // 4 = pioggia madre con la regola del timer: la più vecchia da 15 mm (somma dei giorni consecutivi) nei 20 giorni
 // 5 = + umidità dell'aria e vento medi dei 7 giorni prima (microclima)
-export const SNAPSHOT_VER = 5;
+// 6 = seconda pioggia: rinforzo / nuovo timer / saturazione (timerState)
+export const SNAPSHOT_VER = 6;
 const MIN_FRUIT_DAYS = 5;
 
 async function snapshotFor(place, v, s) {
@@ -234,7 +235,7 @@ async function snapshotFor(place, v, s) {
   const win = w.days.slice(Math.max(0, idx - s.windowDays), idx);
   const meanT = win.reduce((a, d) => a + (d.tmax + d.tmin) / 2, 0) / win.length - dT;
   const meanMax = win.reduce((a, d) => a + d.tmax, 0) / win.length - dT;
-  const tr = timerRain(w.days, idx - s.rainWindowDays, idx - MIN_FRUIT_DAYS, s.rainEventMm);
+  const tr = timerState(w.days, idx - s.rainWindowDays, idx - MIN_FRUIT_DAYS, s, place.forestKey || forestByElevation(place.elevation).key);
   const rain = w.days.slice(Math.max(0, idx - s.rainWindowDays), idx).reduce((a, d) => a + (d.rain ?? 0), 0);
   const soilTheta = soilMoisture(w.days, idx - 1); // stato del suolo la mattina del ritrovamento (prima della pioggia di quel giorno)
   const expo = place.slope >= 3 ? -Math.cos((place.aspect * Math.PI) / 180) * Math.min(1, place.slope / 12) * ((s.southOffsetM * g) / 100) : 0;

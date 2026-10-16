@@ -223,6 +223,13 @@ function accessText(acc) {
   const d = acc.distM < 1000 ? `${acc.distM} m` : `${fmt1(acc.distM / 1000)} km`;
   return `Strada a ${d} (${acc.walkMin} min a piedi)`;
 }
+// Ultima pioggia arrivata su un timer già avviato
+function rainEventText(e, saturated) {
+  const d = itDate(e.date);
+  if (e.type === 'nuovo') return `Pioggia del ${d} (${e.mm} mm) su suolo ormai secco (${e.theta}%): <b>nuovo timer</b>`;
+  if (e.type === 'saturazione') return `<span style="color:var(--warn)">Pioggia del ${d} (${e.mm} mm) su suolo già saturo (${e.theta}%)${saturated ? ': voto ridotto per qualche giorno' : ''}</span>`;
+  return `Pioggia del ${d} (${e.mm} mm) su suolo ancora umido (${e.theta}%): <b>rinforzo</b>, finestra più lunga`;
+}
 // Microclima umido vicino a fossi e impluvi
 function microText(m) {
   const where = !m.water ? 'versante riparato' : m.distM < 30 ? 'sul fosso' : `fosso a ${m.distM} m${m.hand ? ` (+${m.hand} m)` : ''}`;
@@ -273,6 +280,7 @@ function spotPopup(s) {
     s.fungaia ? `${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}` : '',
     s.micro ? `<span style="color:var(--ok)">${microText(s.micro)}</span>` : '',
     s.nearEmpty ? `<span style="color:var(--warn)">Uscita a vuoto a ${s.nearEmpty.m} m il ${itDate(s.nearEmpty.date)}: voto ridotto</span>` : '',
+    s.rainEvent ? rainEventText(s.rainEvent, s.saturated) : '',
     s.wind ? windText(s.wind) : '',
     z ? `Giro zona ${z.id}: ${z.spots.join(' → ')} → ${z.spots[0]} (~${fmt1(z.tourKm)} km)` : '',
   ].filter(Boolean).map((x) => `<div>${x}</div>`).join('');

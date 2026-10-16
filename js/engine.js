@@ -75,6 +75,66 @@ export function timerRain(days, fromIdx, toIdx, minMm) {
   return eps.length ? { ...eps[0], timerIdx: eps[0].endIdx, weak: true } : null;
 }
 
+// ---------- Seconda pioggia su un timer già avviato ----------
+// Regola dell'utente (ottobre 2026): l'effetto di una nuova pioggia dipende dallo stato del suolo quando arriva,
+// non dai millimetri. Tre domande: la pioggia precedente c'è ancora? il suolo è elastico o polveroso? nei giorni
+// in mezzo il bosco ha conservato l'umidità (vento teso, caldo) o no (notti umide)? Tre esiti:
+//  - nuovo timer ("vero nuovo impulso"): suolo ormai secco, o prima pioggia scarsa (<15 mm) -> il timer riparte;
+//  - rinforzo ("reintegro"): suolo ancora umido o al limite -> il timer continua e la finestra si allunga;
+//  - stop ("saturazione"): suolo già saturo e nuova pioggia abbondante -> voto ridotto per alcuni giorni.
+// Quercia e castagno restano un unico bosco (la carta Copernicus non li distingue): valori medi tra i due
+// (castagno drena benissimo e quasi non satura, quercia secca prima e satura di più).
+export const SECOND_RAIN = {
+  quercia: { resetBelow: 0.30, satWeight: 0.6 },
+  faggio: { resetBelow: 0.25, satWeight: 1.0 },
+  satAbove: 0.85, satMinMm: 20, satDays: 6, satPenalty: 0.35,
+};
+export function timerState(days, fromIdx, toIdx, s, forestKey) {
+  const eps = rainEpisodes(days, fromIdx, toIdx, s.rainEventMm);
+  if (!eps.length) return null;
+  const P = SECOND_RAIN[forestKey] || SECOND_RAIN.quercia;
+  const trigger = (e) => { // giorno in cui la somma arriva a 15 mm (o fine episodio se non ci arriva)
+    if (e.total < RAIN_FULL_MM) return e.endIdx;
+    let c = 0;
+    for (let k = e.startIdx; k <= e.endIdx; k++) { c += days[k].rain ?? 0; if (c >= RAIN_FULL_MM) return k; }
+    return e.endIdx;
+  };
+  let cur = { ...eps[0], timerIdx: trigger(eps[0]), weak: eps[0].total < RAIN_FULL_MM };
+  let ext = 0, sat = null, event = null;
+  for (const e of eps.slice(1)) {
+    const theta = soilMoisture(days, e.startIdx - 1);
+    // giorni in mezzo: il vento teso e il caldo asciugano più di quanto dica l'evaporazione, le giornate umide conservano
+    let adj = 0;
+    for (let i = cur.timerIdx + 1; i < e.startIdx; i++) {
+      const d = days[i];
+      if (windLoad(d) > 0) adj -= 0.04;
+      if (d.tmax >= 26) adj -= 0.03;
+      if (d.rh != null && d.rh >= 85) adj += 0.02;
+    }
+    const thetaEff = theta + Math.max(-0.15, Math.min(0.1, adj));
+    const date = days[e.endIdx].date, mm = Math.round(e.total);
+    if ((cur.weak && e.total >= RAIN_FULL_MM) || thetaEff < P.resetBelow) {
+      cur = { ...e, timerIdx: trigger(e), weak: e.total < RAIN_FULL_MM };
+      ext = 0; sat = null;
+      event = { type: 'nuovo', date, mm, theta: Math.round(theta * 100) };
+    } else if (theta >= SECOND_RAIN.satAbove && e.total >= SECOND_RAIN.satMinMm) {
+      sat = { endIdx: e.endIdx, weight: P.satWeight };
+      event = { type: 'saturazione', date, mm, theta: Math.round(theta * 100) };
+    } else {
+      ext = Math.max(ext, Math.min(6, Math.round(2 + e.total / 15)));
+      event = { type: 'rinforzo', date, mm, theta: Math.round(theta * 100) };
+    }
+  }
+  return { timerIdx: cur.timerIdx, total: cur.total, weak: cur.weak, ext, sat, event };
+}
+// Penalità per terreno saturo: piena nei giorni subito dopo la pioggia, dimezzata sulle pendenze che drenano (>15°)
+export function saturationFactor(sat, idx, slope) {
+  if (!sat) return 1;
+  const since = idx - sat.endIdx;
+  if (since < 0 || since > SECOND_RAIN.satDays) return 1;
+  return 1 - SECOND_RAIN.satPenalty * sat.weight * (slope != null && slope > 15 ? 0.5 : 1);
+}
+
 export function summarize(days, dateStr, s) {
   const idx = days.findIndex((d) => d.date === dateStr);
   if (idx < 0) throw new Error('Data fuori dall’intervallo meteo disponibile (max 15 giorni avanti)');
@@ -239,10 +299,12 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   const staleDays = longTimer ? Math.max(STALE_DAYS, t.end) : STALE_DAYS;
 
   let best = { score: 0.05, daysSince: null, killers: [], weak: false };
-  const tr = timerRain(days, timerFrom, idx, s.rainEventMm);
+  const tr = timerState(days, timerFrom, idx, s, forestKey);
   if (tr) {
     const daysSince = idx - tr.timerIdx;
-    let sc = timerScore(daysSince, t);
+    // rinforzo: la seconda pioggia allunga la finestra di qualche giorno
+    const tx = tr.ext ? { ...t, optEnd: t.optEnd + tr.ext, end: t.end + tr.ext } : t;
+    let sc = timerScore(daysSince, tx);
     const killers = [];
     for (let i = tr.timerIdx + 1; i <= idx; i++) {
       const d = days[i];
@@ -267,6 +329,8 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
     timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
     daysSince: best.daysSince, killers: best.killers, soil, wind, lastRainDays, lastRainDate,
     weakRain: best.weak, // pioggia sotto i 15 mm: voto −20%
+    rainEvent: tr?.event || null, // ultima pioggia arrivata sul timer: nuovo / rinforzo / saturazione
+    sat: tr?.sat && idx - tr.sat.endIdx <= SECOND_RAIN.satDays ? { ...tr.sat, idx } : null,
     staleDays, // oltre questi giorni dall'ultima pioggia il voto si riduce (20; faggi fino a fine timer)
     air: airMoisture(days, idx), // umidità dell'aria e calma di vento negli ultimi 7 giorni
   };

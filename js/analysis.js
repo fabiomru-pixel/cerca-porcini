@@ -12,7 +12,7 @@ import { nearestRoad, walkMinutes } from './access.js';
 import { wetness } from './hydro.js';
 import {
   activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore, WIND_NAMES, staleFactor,
-  WEAK_RAIN_FACTOR, microSoil, shelterOf,
+  WEAK_RAIN_FACTOR, microSoil, shelterOf, saturationFactor,
 } from './engine.js';
 
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
@@ -64,8 +64,10 @@ const microInfo = (wet, tm, soilEff) => (soilEff - tm.soil.factor >= 0.03 ? {
 // Combina luogo (con bonus margini/fungaie, max 1), suolo, timer e stagione: vedi finalScore
 // + pioggia troppo vecchia (oltre 20 giorni, peggio se fa caldo): vedi staleFactor
 // + microclima (sh = riparo: zona umida o versante Nord, vedi shelterOf): compensa il suolo secco con aria umida e calma
-const combine = (place, tm, season, bonus, hot, sh) => finalScore(Math.min(1, place * bonus), microSoil(tm.soil.factor, sh, tm.air?.f), tm.timer, season)
-  * staleFactor(tm.lastRainDays, hot, tm.staleDays) * (tm.weakRain ? WEAK_RAIN_FACTOR : 1);
+// + terreno saturo da una seconda pioggia (meno grave sulle pendenze che drenano)
+const combine = (place, tm, season, bonus, hot, sh, slope) => finalScore(Math.min(1, place * bonus), microSoil(tm.soil.factor, sh, tm.air?.f), tm.timer, season)
+  * staleFactor(tm.lastRainDays, hot, tm.staleDays) * (tm.weakRain ? WEAK_RAIN_FACTOR : 1)
+  * (tm.sat ? saturationFactor(tm.sat, tm.sat.idx, slope) : 1);
 
 export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], empties = [], onStep = () => {} }) {
   const radius = s.radiusKm;
@@ -225,7 +227,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime, wind: tm.wind }, ctx, g.key);
-        const fin = combine(pl.score, tm, g.weight, bonus, hot, sh);
+        const fin = combine(pl.score, tm, g.weight, bonus, hot, sh, slope);
         if (!best || fin > best.fin) best = { fin, pl, tm, g };
       }
       img.set(colorFor(best.pl.score * best.g.weight, best.g.key), k * 4);
@@ -251,7 +253,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     let best = null;
     for (const g of groups) {
       const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime: w.regime, wind: tm.wind }, ctx, g.key);
-      const fin = combine(pl.score, tm, g.weight, bonus, hot, shelterOf(wet?.m, aspect, slope));
+      const fin = combine(pl.score, tm, g.weight, bonus, hot, shelterOf(wet?.m, aspect, slope), slope);
       if (!best || fin > best.fin) best = { fin, pl, tm, g };
     }
     return { fk, wet, ...best };
@@ -414,7 +416,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         let bonus = edge;
         bonus *= nearFindBonus(c);
         bonus *= emptyFactor(c, tm);
-        const fin = combine(pl.score, tm, g.weight, bonus, hot, sh);
+        const fin = combine(pl.score, tm, g.weight, bonus, hot, sh, c.slope);
         if (!best || fin > best.fin) best = { fin, pl, g, bonus };
       }
       const luogo = Math.min(1, best.pl.score * best.bonus);
@@ -452,7 +454,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         protected: protectedAt(protectedFc, c.lat, c.lon),
         nearFind: nearFinds.some((f) => distKm(c, f) < 1),
         nearEmpty: (() => { const e = nearEmpties.filter((x) => distKm(c, x) <= 1.5 && daysBetween(x.date, date) >= 0 && daysBetween(x.date, date) <= 21).sort((a, b) => distKm(c, a) - distKm(c, b))[0]; return e ? { date: e.date, m: Math.round(distKm(c, e) * 1000) } : null; })(),
-        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate, staleDays: tm.staleDays,
+        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate, staleDays: tm.staleDays, rainEvent: tm.rainEvent, saturated: !!tm.sat,
         regime,
       };
     })
@@ -518,7 +520,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation, slope, aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
-        const fin = combine(pl.score, tm, g.weight, fBonus, hot, fSh);
+        const fin = combine(pl.score, tm, g.weight, fBonus, hot, fSh, slope);
         if (!best || fin > best.fin) best = { fin, pl, g };
       }
       const sm = placeSummary(place);
@@ -539,7 +541,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         forest: FORESTS[fk].label,
         forestType: patch ? `${patch.type}, copertura ${Math.round(patch.frac * 100)}%` : place.forest || null,
         rainTotal: Math.round(tm.rainTotal), daysSince: tm.daysSince, killers: tm.killers,
-        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate, staleDays: tm.staleDays,
+        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate, staleDays: tm.staleDays, rainEvent: tm.rainEvent, saturated: !!tm.sat,
         protected: protectedAt(protectedFc, place.lat, place.lon),
         regime, idealDays: ideal.idealDays, idealSource: ideal.source,
         rainSrc: w.rainSrc,
