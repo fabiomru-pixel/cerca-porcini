@@ -41,5 +41,25 @@ const versionCode = Number(process.env.GITHUB_RUN_NUMBER || 1);
 const gradle = path.join(app, 'build.gradle');
 let g = fs.readFileSync(gradle, 'utf8');
 g = g.replace(/versionCode \d+/, `versionCode ${versionCode}`).replace(/versionName "[^"]*"/, `versionName "${versionName}"`);
+
+// 4. firma con la chiave fissa del repository: senza questo Gradle usa una chiave creata a caso a ogni
+// compilazione e Android rifiuta gli aggiornamenti ("pacchetto in conflitto con un pacchetto esistente")
+const signing = `
+    signingConfigs {
+        fisso {
+            storeFile file("\${rootDir}/../android-signing/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }`;
+if (!g.includes('signingConfigs.fisso')) {
+  g = g.replace(/android\s*\{/, (m) => m + signing);
+  g = g.replace(/buildTypes\s*\{/, (m) => `${m}
+        debug {
+            signingConfig signingConfigs.fisso
+        }`);
+}
+if (!g.includes('signingConfigs.fisso')) throw new Error('build.gradle: firma fissa non inserita');
 fs.writeFileSync(gradle, g);
 console.log(`Android pronto: versione ${versionName} (${versionCode})`);
