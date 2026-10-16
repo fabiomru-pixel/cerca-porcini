@@ -3,6 +3,7 @@ import { kv, finds as fdb, photos as pdb } from './db.js';
 import { icon } from './icons.js';
 import { NATIVE } from './platform.js';
 import { createNav, walkMin } from './nav.js';
+import { checkUpdate, installUpdate } from './update.js';
 import { runAnalysis } from './analysis.js';
 import { buildGpx, shareOrDownload, download } from './gpx.js';
 import {
@@ -1429,6 +1430,34 @@ function outingGpx(o) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Cerca Porcini" xmlns="http://www.topografix.com/GPX/1/1">\n${wpts}\n<trk><name>${x(o.title || 'Giro')}</name><trkseg>${trk}</trkseg></trk>\n</gpx>\n`;
 }
 
+// ---------------------------------------------------------------- aggiornamento dell'app Android
+let updateAsked = false;
+async function lookForUpdate(manual) {
+  if (!navigator.onLine) { if (manual) toast('Serve la connessione per controllare'); return; }
+  if (!manual && (updateAsked || nav)) return; // mai durante una guida a piedi
+  let u = null;
+  try { u = await checkUpdate(); } catch { u = null; }
+  if (!u) { if (manual) toast(`Hai già l'ultima versione (${APP_VERSION})`); return; }
+  updateAsked = true;
+  $('#updForm').innerHTML = `<h2>Nuova versione disponibile</h2>
+    <p>È pronta la versione <b>${esc(u.version)}</b> (tu hai la ${APP_VERSION})${u.sizeMb ? ` · ${u.sizeMb} MB` : ''}.</p>
+    <p class="small muted">L'app la scarica e apre l'installazione: tocca <b>Aggiorna</b> nella schermata di Android. Fungaie e giri restano.</p>
+    <div class="btn-row"><button class="btn primary" value="ok">Aggiorna ora</button><button class="btn" value="">Più tardi</button></div>`;
+  const dlg = $('#updDlg');
+  dlg.onclose = async () => {
+    if (dlg.returnValue !== 'ok') return;
+    progress('Scarico l\'aggiornamento…', 0);
+    try {
+      await installUpdate((f) => progress(`Scarico l'aggiornamento… ${Math.round(f * 100)}%`, f));
+      progress(null);
+    } catch (e) {
+      progress(null);
+      toast(e.message || 'Aggiornamento non riuscito', 6000);
+    }
+  };
+  dlg.showModal();
+}
+
 // ---------------------------------------------------------------- tab e pannello
 function switchTab(name) {
   $$('.tab').forEach((t) => t.setAttribute('aria-selected', t.dataset.tab === name));
@@ -1532,7 +1561,9 @@ function bindUI() {
   $('#importBtn').onclick = () => $('#importFile').click();
   $('#importFile').onchange = async (e) => { try { await importBackup(e.target.files[0]); } catch (err) { toast('Import non riuscito: ' + err.message); } e.target.value = ''; };
   $('#clearTilesBtn').onclick = async () => { await caches.delete('cp-tiles-v2'); toast('Mappe offline eliminate'); updateStorageInfo(); };
-  $('#versionInfo').textContent = `Versione ${APP_VERSION}`;
+  $('#versionInfo').textContent = `Versione ${APP_VERSION}${NATIVE ? ' · app Android' : ''}`;
+  $('#updateBtn').hidden = !NATIVE;
+  $('#updateBtn').onclick = () => lookForUpdate(true);
 
   const net = () => { const on = navigator.onLine; $('#net').textContent = on ? 'online' : 'offline'; $('#net').classList.toggle('off', !on); if (on) completePending(); };
   addEventListener('online', net); addEventListener('offline', net); net();
@@ -1564,6 +1595,7 @@ async function init() {
   await migrateFinds(); // fungaie della prima versione -> luogo + ritrovamenti
   await refreshFinds();
   renderOutings();
+  if (NATIVE) setTimeout(() => lookForUpdate(false), 2500); // controllo della nuova versione all'apertura
   locate({ silent: true });
   completePending();
   updateStorageInfo();

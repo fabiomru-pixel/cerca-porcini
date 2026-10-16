@@ -17,6 +17,7 @@ const perms = [
   'android.permission.POST_NOTIFICATIONS',
   'android.permission.VIBRATE',
   'android.permission.WAKE_LOCK',
+  'android.permission.REQUEST_INSTALL_PACKAGES', // per installare gli aggiornamenti scaricati dall'app
 ];
 const add = perms.filter((p) => !xml.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
 xml = xml.replace(/<\/manifest>\s*$/, `${add}\n    <uses-feature android:name="android.hardware.location.gps" android:required="false" />\n</manifest>\n`);
