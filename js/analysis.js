@@ -26,10 +26,11 @@ const windInfo = (windF, wind) => {
 };
 
 function weatherGrid(lat, lon, radiusKm) {
-  // maglia fitta (i temporali sono locali), ma al massimo ~100 punti per restare nei limiti del servizio
-  // gratuito: con raggi grandi la maglia si allarga, poi le aree migliori ricevono il loro meteo puntuale
+  // maglia fitta (i temporali sono locali), ma al massimo ~45 punti: Open-Meteo pesa ogni punto per variabili,
+  // modelli e giorni (limite gratuito 600 al minuto, 10.000 al giorno) e con 89 punti un'analisi ne valeva ~720.
+  // La pioggia degli spot viene comunque dai pluviometri vicini, la temperatura dalla quota dello spot.
   const base = radiusKm <= 20 ? 5 : radiusKm <= 50 ? 8 : 12;
-  const step = Math.max(base, radiusKm * Math.sqrt(Math.PI / 60)); // ~60 punti al massimo
+  const step = Math.max(base, radiusKm * 0.33); // ~45 punti al massimo, margine ai bordi compreso
   const dLat = step / 111.32, dLon = step / (111.32 * Math.cos((lat * Math.PI) / 180));
   const n = Math.ceil(radiusKm / step);
   const pts = [];
@@ -84,7 +85,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   onStep('Scarico il meteo della tua zona…', 0.05);
   // solo i giorni che servono: meno dati = meno "peso" sul limite del servizio gratuito
   const fDays = Math.max(1, ahead + 1);
-  const onWait = (sec) => onStep(`Il servizio meteo chiede una pausa: riprovo tra ${sec} secondi…`, 0.45);
+  const onWait = (sec) => onStep(`Il servizio meteo è lento o chiede una pausa: riprovo tra ${sec} secondi…`, 0.45);
   onStep('Leggo i pluviometri SIR…', 0.04);
   const G = await loadGauges({ lat, lon, km: radius }); // pluviometri SIR (null fuori Toscana o se i dati sono vecchi)
   // pioggia del punto: misurata dai pluviometri vicini se ci sono, altrimenti media dei modelli
@@ -141,7 +142,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
 
   onStep('Scarico il meteo in quota…', 0.45);
   const grid = weatherGrid(lat, lon, radius);
-  const wx = await fetchDaily(grid.pts, { pastDays, forecastDays: fDays, onWait });
+  const wx = await fetchDaily(grid.pts, { pastDays, forecastDays: fDays, onWait,
+    onProgress: (d, n) => onStep(`Scarico il meteo in quota… ${d}/${n} punti`, 0.45 + 0.1 * (d / Math.max(1, n))) });
   const byIJ = new Map();
   const prepWeather = (w) => {
     // tempismo per tipo di bosco ("lepri" e "diesel"), a una quota rappresentativa
@@ -342,7 +344,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   try {
     // solo con raggi grandi (maglia larga) e per le 40 aree migliori: meno richieste al servizio gratuito
     const need = radius > 60 ? areas.slice(0, 40) : [];
-    const aw = need.length ? await fetchDaily(need.map((c) => ({ lat: c.lat, lon: c.lon })), { pastDays, forecastDays: fDays, onWait }) : [];
+    const aw = need.length ? await fetchDaily(need.map((c) => ({ lat: c.lat, lon: c.lon })), { pastDays, forecastDays: fDays, onWait,
+      onProgress: (d, n) => onStep(`Scarico il meteo puntuale delle aree migliori… ${d}/${n}`, 0.66) }) : [];
     aw.forEach((w, k) => { applyGauges(w, G); prepWeather(w); need[k].w = w; });
   } catch (e) { console.warn('meteo aree', e); /* resta la maglia larga */ }
   const allWx = [...wx, ...areas.map((c) => c.w).filter(Boolean)];
