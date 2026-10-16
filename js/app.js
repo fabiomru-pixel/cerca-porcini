@@ -1053,8 +1053,11 @@ async function exportBackup() {
   download(blob, `cerca-porcini-backup-${todayStr()}.json`);
 }
 async function importBackup(file) {
-  const j = JSON.parse(await file.text());
-  if (j.app !== 'cerca-porcini') throw new Error('File non valido');
+  if (!file) return;
+  let j;
+  try { j = JSON.parse(await file.text()); } catch { throw new Error('il file scelto non è un backup di Cerca Porcini (.json)'); }
+  if (j.app !== 'cerca-porcini') throw new Error('il file scelto non è un backup di Cerca Porcini');
+  toast(`Importo ${(j.finds || []).length} fungaie…`);
   let n = 0;
   for (const f of j.finds || []) {
     const cur = await fdb.get(f.id);
