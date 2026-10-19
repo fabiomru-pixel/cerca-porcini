@@ -213,7 +213,8 @@ function drawMe() {
   layers.me.clearLayers();
   if (state.gps) {
     L.circle([state.gps.lat, state.gps.lon], { radius: state.gps.acc || 30, color: '#2563eb', weight: 1, fillOpacity: 0.08 }).addTo(layers.me);
-    L.marker([state.gps.lat, state.gps.lon], { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }), interactive: false }).addTo(layers.me);
+    L.marker([state.gps.lat, state.gps.lon], { icon: L.divIcon({ className: '', html: ME_HTML, iconSize: [44, 44], iconAnchor: [22, 22] }), interactive: false }).addTo(layers.me);
+    updateMeArrow();
   }
   if (state.start?.manual) {
     L.circleMarker([state.start.lat, state.start.lon], { radius: 8, color: '#7c3aed', weight: 3, fillOpacity: 0.3 }).bindTooltip('Partenza').addTo(layers.me);
@@ -1198,7 +1199,35 @@ function onOrientation(e) {
   // compensa la rotazione dello schermo
   const so = (screen.orientation && screen.orientation.angle) || 0;
   heading = (h + so) % 360;
+  compassAt = Date.now();
   updateCarArrow();
+  updateMeArrow();
+}
+
+// ---- freccia della posizione (come Google Maps e Mapy): bussola se c'è, altrimenti direzione di marcia
+const ME_HTML = '<div class="me-pos"><svg viewBox="0 0 44 44" aria-hidden="true"><path d="M22 4 L35 37 L22 29.5 L9 37 Z"/></svg><div class="dot"></div></div>';
+let compassAt = 0, gpsHeading = null, gpsHeadingAt = 0, shownDeg = null;
+function setGpsHeading(h) { gpsHeading = h; gpsHeadingAt = Date.now(); }
+function currentHeading() {
+  if (heading != null && Date.now() - compassAt < 3000) return heading;
+  if (gpsHeading != null && Date.now() - gpsHeadingAt < 20000) return gpsHeading;
+  return null;
+}
+function updateMeArrow() {
+  const h = currentHeading();
+  if (h != null) {
+    // rotazione sempre per la via più breve (niente giro completo passando da 359° a 0°)
+    if (shownDeg == null) shownDeg = h;
+    else shownDeg += ((((h - shownDeg) % 360) + 540) % 360) - 180;
+  }
+  document.querySelectorAll('.me-pos').forEach((el) => {
+    el.classList.toggle('h', h != null);
+    if (h != null) el.querySelector('svg').style.transform = `rotate(${shownDeg}deg)`;
+  });
+}
+function startCompass() {
+  addEventListener('deviceorientationabsolute', onOrientation);
+  addEventListener('deviceorientation', onOrientation);
 }
 
 function startCarTracking() {
@@ -1213,14 +1242,10 @@ function startCarTracking() {
       drawMe(); drawCar(); updateCarArrow();
     }, () => { updateCarArrow(); }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 30000 });
   }
-  addEventListener('deviceorientationabsolute', onOrientation);
-  addEventListener('deviceorientation', onOrientation);
 }
 function stopCarTracking() {
   if (carWatch != null) navigator.geolocation.clearWatch(carWatch);
-  carWatch = null; heading = null;
-  removeEventListener('deviceorientationabsolute', onOrientation);
-  removeEventListener('deviceorientation', onOrientation);
+  carWatch = null;
 }
 
 const DIR8 = ['Nord', 'Nord-Est', 'Est', 'Sud-Est', 'Sud', 'Sud-Ovest', 'Ovest', 'Nord-Ovest'];
@@ -1381,7 +1406,9 @@ function renderNav(v) {
   navLayers.eachLayer((l) => { if (l.options?.navTrack || l.options?.navMe) navLayers.removeLayer(l); });
   if (v.track.length > 1) L.polyline(v.track.map((p) => [p.lat, p.lon]), { color: '#FFBF46', weight: 4, opacity: 0.9, navTrack: true }).addTo(navLayers);
   if (v.pos) {
-    L.marker([v.pos.lat, v.pos.lon], { navMe: true, interactive: false, icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(navLayers);
+    if (v.pos.heading != null && (v.pos.speed ?? 0) > 0.7) setGpsHeading(v.pos.heading); // in cammino: direzione di marcia
+    L.marker([v.pos.lat, v.pos.lon], { navMe: true, interactive: false, icon: L.divIcon({ className: '', html: ME_HTML, iconSize: [44, 44], iconAnchor: [22, 22] }) }).addTo(navLayers);
+    updateMeArrow();
     // alla prima posizione la mappa si avvicina (zoom da sentiero), poi segue senza cambiare zoom
     if (!navZoomed) { navZoomed = true; map.setView([v.pos.lat, v.pos.lon], Math.max(map.getZoom(), 16)); }
     else if (Date.now() > followPausedUntil) map.panTo([v.pos.lat, v.pos.lon], { animate: true });
@@ -1691,6 +1718,7 @@ async function init() {
   await migrateFinds(); // fungaie della prima versione -> luogo + ritrovamenti
   await refreshFinds();
   renderOutings();
+  startCompass();
   initSafety({ syncSilently, buildBackup, onChange: () => renderSyncStatus() });
   dirtySince().then((d) => {
     if (d && Date.now() - new Date(d) > 24 * 36e5) setTimeout(() => toast('Hai modifiche non salvate su Drive da più di un giorno: apri Fungaie e premi Sincronizza', 8000), 4000);

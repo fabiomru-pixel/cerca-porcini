@@ -331,3 +331,13 @@ body.nav-on .search { display: none; }
 .out-sum b { display: block; font-family: var(--font-display); font-weight: 400; font-size: 22px; color: var(--primary-text); }
 .out-sum span { font-size: 12px; color: var(--muted); }
 #outDlg form { padding: 16px; }
+
+/* ---------- Posizione: freccia orientata ---------- */
+.me-pos { position: relative; width: 44px; height: 44px; }
+.me-pos svg { position: absolute; inset: 0; width: 44px; height: 44px; display: none; transition: transform .25s linear;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,.4)); }
+.me-pos svg path { fill: #2563eb; stroke: #fff; stroke-width: 3; stroke-linejoin: round; }
+.me-pos .dot { position: absolute; left: 13px; top: 13px; width: 18px; height: 18px; border-radius: 50%; background: #2563eb;
+  border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(37,99,235,.25); box-sizing: border-box; }
+.me-pos.h svg { display: block; }
+.me-pos.h .dot { display: none; }
