@@ -54,6 +54,8 @@ function loadGis() {
   });
 }
 
+export const hasToken = () => !!token && Date.now() < tokenExp - 60000;
+
 export async function getToken(clientId, interactive = true) {
   if (!clientId) throw new Error('Manca il Client ID di Google: impostalo in Impostazioni.');
   if (token && Date.now() < tokenExp - 60000) return token;

@@ -4,13 +4,14 @@ import { icon } from './icons.js';
 import { NATIVE } from './platform.js';
 import { createNav, walkMin } from './nav.js';
 import { checkUpdate, installUpdate } from './update.js';
+import { initSafety, markDirty, markSynced, dirtySince, localBackup, photoToGallery } from './safety.js';
 import { runAnalysis } from './analysis.js';
 import { buildGpx, shareOrDownload, download } from './gpx.js';
 import {
   createPlace, addVisit, updateVisit, updatePlace, deleteFind, listFinds, processPending, computeLearn,
   normalizeFind, placeSummary, visitOffset, predictPlace, migrateFinds, AGES, STATES,
 } from './finds.js';
-import { syncDrive } from './drive.js';
+import { syncDrive, hasToken } from './drive.js';
 import { lon2px, lat2px, distKm, bearing, fmtDist, parseCoords, ASPECT_NAME } from './geo.js';
 import { addDays } from './engine.js';
 import { REGIMES } from './climate.js';
@@ -864,6 +865,7 @@ async function submitFind() {
   const empty = mode !== 'editPlace' && getSeg('outcomeSeg') === 'empty';
   toast(`${empty ? 'Uscita a vuoto registrata' : mode === 'editPlace' ? 'Fungaia aggiornata' : 'Ritrovamento salvato'}${navigator.onLine ? '' : ' (offline: completo i dati quando torna la rete)'}`, 3500);
   await refreshFinds();
+  markDirty();
   completePending();
   if (mode !== 'new') setTimeout(() => openView(saved.id), 50);
   return true;
@@ -971,7 +973,7 @@ async function openView(id) {
   $$('#viewBody [data-edit]').forEach((b) => b.onclick = () => { $('#viewDlg').close(); openFindForm('editVisit', f.id, b.dataset.edit); });
   $('#viewDelete').onclick = async () => {
     if (!confirm('Eliminare tutta la fungaia con i suoi ritrovamenti? Verrà rimossa anche da Drive alla prossima sincronizzazione.')) return;
-    await deleteFind(id); $('#viewDlg').close(); await refreshFinds(); toast('Fungaia eliminata');
+    await deleteFind(id); $('#viewDlg').close(); await refreshFinds(); markDirty(); toast('Fungaia eliminata');
   };
   $('#viewMap').onclick = () => { $('#viewDlg').close(); map.setView([f.lat, f.lon], 16); if (innerWidth < 900) setSheet('peek'); };
   $('#viewEditPlace').onclick = () => { $('#viewDlg').close(); openFindForm('editPlace', f.id); };
@@ -1023,6 +1025,7 @@ async function doSync() {
   const btn = $('#syncBtn'); btn.disabled = true;
   try {
     const r = await syncDrive(state.settings, saveSettings, (t) => progress(t, 0.5));
+    await markSynced();
     await refreshFinds();
     renderSyncStatus();
     toast(`Sincronizzato: ${r.total} fungaie, ${r.outings || 0} giri, ${r.uploaded} foto, ${r.analyses || 0} analisi`); renderOutings();
@@ -1032,11 +1035,25 @@ async function doSync() {
     toast('Sincronizzazione non riuscita: ' + msg, 6000);
   } finally { progress(null); btn.disabled = false; }
 }
-function renderSyncStatus() {
+async function renderSyncStatus() {
   const s = state.settings;
-  $('#syncStatus').innerHTML = !s.driveClientId
+  const dirty = await dirtySince();
+  const local = await kv.get('localBackupAt');
+  const ago = dirty ? Math.round((Date.now() - new Date(dirty)) / 36e5) : 0;
+  const line = !s.driveClientId
     ? 'Google Drive non configurato (Impostazioni).'
     : s.lastSync ? `Ultima sincronizzazione con Drive: ${new Date(s.lastSync).toLocaleString('it-IT')}` : 'Drive configurato: premi Sincronizza.';
+  $('#syncStatus').innerHTML = (dirty
+    ? `<div class="alert ${ago >= 24 ? 'bad' : 'warn'}" style="margin:0 0 6px"><b>Modifiche non ancora salvate su Drive</b> ${ago >= 1 ? `da ${ago} or${ago === 1 ? 'a' : 'e'}` : 'da poco'}: premi <b>Sincronizza</b> per metterle al sicuro.</div>` : '')
+    + line + (NATIVE && local ? `<br>Copia di sicurezza sul telefono (Documenti/CercaPorcini): ${new Date(local).toLocaleString('it-IT')}` : '');
+}
+
+// sincronizzazione automatica: solo se l'accesso a Google è ancora valido (dura circa un'ora dopo "Sincronizza")
+async function syncSilently() {
+  if (!state.settings.driveClientId || !hasToken() || !navigator.onLine) return;
+  await syncDrive(state.settings, saveSettings, () => {});
+  await markSynced();
+  await refreshFinds(); renderOutings(); renderSyncStatus();
 }
 
 function renderLearn() {
@@ -1062,13 +1079,17 @@ function renderLearn() {
 }
 
 // ---------------------------------------------------------------- backup
-async function exportBackup() {
+async function buildBackup() {
   const fs = await fdb.all();
   const ps = await pdb.all();
   const toB64 = (b) => new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(b); });
   const photos = [];
   for (const p of ps) photos.push({ id: p.id, findId: p.findId, driveId: p.driveId, data: await toB64(p.blob) });
-  const blob = new Blob([JSON.stringify({ app: 'cerca-porcini', version: APP_VERSION, exportedAt: new Date().toISOString(), finds: fs, photos })], { type: 'application/json' });
+  const outings = (await kv.get('outings')) || [];
+  return { app: 'cerca-porcini', version: APP_VERSION, exportedAt: new Date().toISOString(), finds: fs, photos, outings };
+}
+async function exportBackup() {
+  const blob = new Blob([JSON.stringify(await buildBackup())], { type: 'application/json' });
   download(blob, `cerca-porcini-backup-${todayStr()}.json`);
 }
 async function importBackup(file) {
@@ -1089,8 +1110,15 @@ async function importBackup(file) {
     const { thumb } = await compressImage(blob);
     await pdb.put({ id: p.id, findId: p.findId, driveId: p.driveId, blob, thumb });
   }
+  if (Array.isArray(j.outings) && j.outings.length) {
+    const cur = (await kv.get('outings')) || [];
+    const ids = new Set(cur.map((o) => o.id));
+    await kv.set('outings', [...cur, ...j.outings.filter((o) => !ids.has(o.id))].sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || '')));
+    renderOutings();
+  }
   await refreshFinds();
-  toast(`Importate ${n} fungaie`);
+  markDirty();
+  toast(`Importate ${n} fungaie${j.outings?.length ? ` e ${j.outings.length} giri` : ''}`);
 }
 
 async function updateStorageInfo() {
@@ -1355,6 +1383,7 @@ async function finishNav(sum) {
   const list = (await kv.get('outings')) || [];
   list.unshift(out);
   await kv.set('outings', list.slice(0, 200));
+  markDirty();
   renderOutings();
   showOutingDialog(out);
 }
@@ -1389,7 +1418,7 @@ function showOutingDialog(o) {
 async function setOutingOutcome(id, outcome) {
   const list = (await kv.get('outings')) || [];
   const o = list.find((x) => x.id === id);
-  if (o) { o.outcome = outcome; await kv.set('outings', list); }
+  if (o) { o.outcome = outcome; await kv.set('outings', list); markDirty(); }
   renderOutings();
 }
 
@@ -1434,7 +1463,7 @@ async function renderOutings() {
       else if (act === 'gpx') await shareOrDownload(outingGpx(o), `giro-${o.startedAt.slice(0, 10)}.gpx`);
       else if (act === 'del' && confirm('Eliminare questo riepilogo?')) {
         const l = ((await kv.get('outings')) || []).filter((x) => x.id !== o.id);
-        await kv.set('outings', l); renderOutings();
+        await kv.set('outings', l); markDirty(); renderOutings();
       }
     });
   });
@@ -1576,7 +1605,7 @@ function bindUI() {
   bindSeg('ageSeg', true);
   bindSeg('stateSeg', true);
   $('#fPhotos').onchange = (e) => { newPhotos.push(...e.target.files); e.target.value = ''; renderGallery(); };
-  $('#fCamera').onchange = (e) => { newPhotos.push(...e.target.files); e.target.value = ''; renderGallery(); };
+  $('#fCamera').onchange = (e) => { const files = [...e.target.files]; newPhotos.push(...files); files.forEach((f) => photoToGallery(f)); e.target.value = ''; renderGallery(); };
   $('#findForm').onsubmit = async (e) => {
     if (e.submitter?.value === 'cancel') { stopWatch(); return; }
     e.preventDefault();
@@ -1624,6 +1653,11 @@ async function init() {
   await migrateFinds(); // fungaie della prima versione -> luogo + ritrovamenti
   await refreshFinds();
   renderOutings();
+  initSafety({ syncSilently, buildBackup, onChange: () => renderSyncStatus() });
+  dirtySince().then((d) => {
+    if (d && Date.now() - new Date(d) > 24 * 36e5) setTimeout(() => toast('Hai modifiche non salvate su Drive da più di un giorno: apri Fungaie e premi Sincronizza', 8000), 4000);
+  });
+  if (NATIVE) localBackup().catch(() => {}); // copia di sicurezza aggiornata a ogni apertura
   if (NATIVE) setTimeout(() => lookForUpdate(false), 2500); // controllo della nuova versione all'apertura
   locate({ silent: true });
   completePending();

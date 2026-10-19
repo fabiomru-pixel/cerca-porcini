@@ -8,6 +8,7 @@
   "dependencies": {
     "@capacitor-community/background-geolocation": "^1.2.26",
     "@capacitor-community/file-opener": "^8.0.1",
+    "@capacitor-community/media": "^9.1.0",
     "@capacitor-community/text-to-speech": "^8.0.2",
     "@capacitor/android": "^8.5.3",
     "@capacitor/app": "^8.1.2",
