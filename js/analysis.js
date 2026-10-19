@@ -332,8 +332,30 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   // 1ª passata: le aree più promettenti (anche vicine tra loro: conta solo la qualità)
   onStep('Seleziono le aree più promettenti…', 0.66);
   cands.sort((a, b) => b.fin - a.fin);
+  // pioggia e suolo dai pluviometri vicini a ciascuna cella, non dal punto meteo della griglia (punti ogni 16 km)
+  // le migliori 150 per ogni fascia di distanza (5 anelli): così anche il bosco vicino alla partenza viene ricalcolato
+  const ring = (c) => Math.min(4, Math.floor((distKm(center, c) / radius) * 5));
+  const perRing = [0, 0, 0, 0, 0];
+  const toRescore = cands.filter((c) => perRing[ring(c)]++ < 150);
+  for (const c of toRescore) {
+    const w = atPoint(nearestWeather(grid, byIJ, c.lat, c.lon, center), c.lat, c.lon);
+    const tm2 = evalTiming(w, date, s, c.fk, c.elevation, learn);
+    const before = combine(c.pl.score, c.tm, c.g.weight, 1, hot, 0, c.slope);
+    if (before > 0) c.fin *= combine(c.pl.score, tm2, c.g.weight, 1, hot, 0, c.slope) / before;
+  }
+  // a parità di qualità vince il più vicino: al massimo -3% al bordo del raggio (solo per l'ordine, non per il voto)
+  const nearKey = (c) => c.fin * (1 - 0.03 * Math.min(1, distKm(center, c) / radius));
+  cands.sort((a, b) => nearKey(b) - nearKey(a));
   const areas = [];
   const nAreas = Math.min(90, s.maxSpots * 3);
+  // prima almeno 6 aree per ogni fascia di distanza (se c'è bosco): l'anello esterno ha molte più celle e
+  // da solo riempiva tutte le aree da esaminare, senza dare occasione al bosco vicino alla partenza
+  const ringTaken = [0, 0, 0, 0, 0];
+  for (const c of cands) {
+    if (areas.length >= nAreas) break;
+    const rg = ring(c);
+    if (ringTaken[rg] < 6 && areas.every((p) => distKm(p, c) >= 1.5)) { areas.push(c); ringTaken[rg]++; }
+  }
   for (const c of cands) {
     if (areas.length >= nAreas) break;
     if (areas.every((p) => distKm(p, c) >= 1.5)) areas.push(c);
@@ -363,7 +385,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   }));
 
   // i migliori in assoluto: unica regola, almeno 400 m tra uno spot e l'altro
-  refined.sort((a, b) => b.fin - a.fin);
+  refined.sort((a, b) => nearKey(b) - nearKey(a));
   const picked = [];
   for (const r of refined) {
     if (picked.length >= Math.ceil(s.maxSpots * 2.2)) break; // margine: alcuni verranno esclusi perché lontani dalla strada
@@ -462,7 +484,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       };
     })
     .filter(Boolean)
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => (b.score * (1 - 0.03 * Math.min(1, distKm(center, b) / radius))) - (a.score * (1 - 0.03 * Math.min(1, distKm(center, a) / radius))));
 
   // Raggiungibilità: strada percorribile in auto più vicina e minuti a piedi. Oltre il limite lo spot
   // non conta: nessuno cammina ore "alla cieca" verso un posto che non conosce.
