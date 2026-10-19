@@ -21,6 +21,17 @@ const perms = [
 ];
 const add = perms.filter((p) => !xml.includes(p)).map((p) => `    <uses-permission android:name="${p}" />`).join('\n');
 xml = xml.replace(/<\/manifest>\s*$/, `${add}\n    <uses-feature android:name="android.hardware.location.gps" android:required="false" />\n</manifest>\n`);
+// ritorno dall'accesso Google (pagina oauth.html del sito -> it.cercaporcini.app://oauth)
+if (!xml.includes('android:scheme="it.cercaporcini.app"')) {
+  xml = xml.replace(/(<\/intent-filter>)/, `$1
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="it.cercaporcini.app" android:host="oauth" />
+            </intent-filter>`);
+}
+if (!xml.includes('android:scheme="it.cercaporcini.app"')) throw new Error('AndroidManifest: ritorno OAuth non inserito');
 fs.writeFileSync(mf, xml);
 
 // 2. icone: icona normale e versione "adattiva" (maskable) per i launcher Android recenti

@@ -8,6 +8,7 @@ import { speak, vibrate, watchPosition } from './platform.js';
 const BROUTER = 'https://brouter.de/brouter';
 const ARRIVE_M = 30;        // entro questa distanza lo spot è raggiunto
 const OFF_ROUTE_M = 40;     // oltre questa distanza dal percorso sei fuori
+const MAX_ACC_M = 60;       // posizioni meno precise di così (rete invece del GPS) vengono scartate
 const WALK_KMH = 3.5;       // passo nel bosco, senza dislivello
 const CLIMB_M_PER_H = 400;  // salita: +1 ora ogni 400 m
 
@@ -62,26 +63,33 @@ export const walkMin = (distM, climbM = 0) => Math.round((distM / 1000 / WALK_KM
 // opts: { voice, onUpdate(state), onArrive(target, state), onFinish(summary), onError(msg) }
 export function createNav(targets, back, opts) {
   const st = {
-    targets, back, k: 0, visited: [], track: [], route: null, proj: 0, off: 0, lastReroute: 0,
-    pos: null, startedAt: new Date().toISOString(), finished: false, voice: !!opts.voice, said: new Set(),
+    targets, back, k: 0, visited: [], track: [], route: null, routeK: 0, proj: 0, off: 0, lastReroute: 0, lastTry: 0,
+    pos: null, lastGood: 0, weak: false, startedAt: new Date().toISOString(), finished: false, voice: !!opts.voice,
+    said: new Set(), beeline: false, lastBeeSay: null, coarseWarned: false, t0: Date.now(),
   };
   let stop = null, routing = false;
 
   const say = (text, vib) => { if (vib) vibrate(vib); if (st.voice) speak(text); };
   const legTargets = () => [...st.targets.slice(st.k), ...(st.back ? [st.back] : [])];
   const currentTarget = () => (st.k < st.targets.length ? st.targets[st.k] : st.back);
+  // il percorso viene calcolato una volta per tutte le tappe rimaste: la tappa k è al punto 1 + (k - routeK)
+  const legIdx = () => {
+    const r = st.route;
+    return r ? (r.wpIdx[1 + (st.k - st.routeK)] ?? r.coords.length - 1) : null;
+  };
 
+  // percorso sui sentieri (serve la rete). Se non c'è rete resta quello vecchio, o si guida in linea d'aria
   async function reroute(from) {
-    if (routing) return;
-    routing = true;
+    if (routing) return false;
+    routing = true; st.lastTry = Date.now();
     try {
       const pts = [from, ...legTargets()];
-      if (pts.length < 2) return;
+      if (pts.length < 2) return false;
       st.route = await walkRoute(pts);
-      st.routeK = st.k; // il percorso porta a questa tappa
-      st.beeline = false;
+      st.routeK = st.k; st.beeline = false;
       st.proj = 0; st.said.clear(); st.off = 0; st.lastReroute = Date.now();
-    } catch (e) { opts.onError?.(e.message); } finally { routing = false; }
+      return true;
+    } catch { return false; } finally { routing = false; }
   }
 
   // proiezione sul percorso: cerco vicino all'ultimo punto, poi su tutto se serve
@@ -108,50 +116,72 @@ export function createNav(targets, back, opts) {
     });
   }
 
+  // posizione imprecisa (rete cellulare/Wi-Fi invece del GPS): la scarto se ne ho una buona recente.
+  // Una posizione da ±2 km aveva spostato il punto in un paese vicino mentre l'utente era nel bosco.
+  function acceptFix(p) {
+    const acc = p.acc ?? 999;
+    if (acc <= MAX_ACC_M) { st.lastGood = Date.now(); st.weak = false; return true; }
+    st.weak = true;
+    if (acc >= 1000 && !st.coarseWarned) {
+      st.coarseWarned = true;
+      opts.onError?.('Il telefono dà solo una posizione approssimativa (±' + Math.round(acc) + ' m). Attiva il GPS e la posizione "precisa" per Cerca Porcini nelle impostazioni del telefono.');
+    }
+    // mai oltre 300 m; fino a 300 m solo dopo 2 minuti senza GPS buono (meglio di niente nel bosco fitto)
+    return acc <= 300 && Date.now() - Math.max(st.lastGood, st.t0) > 120000;
+  }
+
   async function onPos(p) {
     if (st.finished) return;
+    if (!acceptFix(p)) { opts.onUpdate?.(view()); return; }
     st.pos = p;
     const last = st.track[st.track.length - 1];
     if (!last || m(last, p) >= 8) st.track.push({ lat: p.lat, lon: p.lon, time: p.time });
-    if (!st.route) { await reroute(p); if (st.route) say(startText(), VIB.start); }
-    if (!st.route) { opts.onUpdate?.(view()); return; }
 
-    // arrivo sulla tappa corrente
+    // percorso: al primo fix, poi riprovo al massimo ogni minuto finché non c'è rete
+    if (!st.route && !routing && Date.now() - st.lastTry > 60000) {
+      const ok = await reroute(p);
+      say(ok ? startText() : beeText(p, 'Senza rete non posso calcolare il percorso sui sentieri: ti guido in linea d\'aria.'), VIB.start);
+    }
+
+    // arrivo sulla tappa corrente (funziona sempre, anche senza rete)
     const tgt = currentTarget();
-    if (tgt && m(p, tgt) <= ARRIVE_M) {
+    if (tgt && m(p, tgt) <= ARRIVE_M && (p.acc ?? 0) <= MAX_ACC_M) {
       if (st.k < st.targets.length) {
-        st.visited.push(tgt.id); st.k++; st.beeline = false;
+        st.visited.push(tgt.id); st.k++; st.beeline = false; st.lastBeeSay = null;
         const next = currentTarget();
-        say(next ? `Arrivato a ${tgt.label}. Prossimo: ${next.label}.` : `Arrivato a ${tgt.label}.`, VIB.arrive);
+        say(next ? `Arrivato a ${tgt.label}. Prossimo: ${next.label}, a ${roundM(m(p, next))} metri.` : `Arrivato a ${tgt.label}.`, VIB.arrive);
         opts.onArrive?.(tgt, view());
         if (!next) { finish('completato'); return; }
-        await reroute(p); opts.onUpdate?.(view()); return;
+        opts.onUpdate?.(view()); return; // il percorso verso la prossima tappa è già calcolato
       }
       say('Sei tornato al punto di partenza. Giro completato.', VIB.arrive);
       finish('completato'); return;
     }
 
-    // fuori percorso: dopo 3 posizioni di fila, avviso e ricalcolo (al massimo ogni 45 secondi)
+    // senza percorso (niente rete): guida in linea d'aria, con un avviso ogni 100 m di avvicinamento
+    if (!st.route) { beeline(p, tgt); opts.onUpdate?.(view()); return; }
+
+    // fuori percorso: dopo 3 posizioni di fila avviso e provo a ricalcolare (senza rete tengo il percorso vecchio)
     const d = project(p);
     if (d > OFF_ROUTE_M && (p.acc ?? 0) < 35 && !st.beeline) {
       st.off++;
-      if (st.off === 3) say('Sei fuori percorso. Ricalcolo.', VIB.off);
-      if (st.off >= 3 && Date.now() - st.lastReroute > 45000) await reroute(p);
+      if (st.off === 3) say('Sei fuori percorso.', VIB.off);
+      if (st.off >= 3 && Date.now() - st.lastReroute > 45000) { st.lastReroute = Date.now(); await reroute(p); }
     } else st.off = 0;
 
     // ultimo tratto: lo spot sta spesso fuori dal sentiero. Finito il percorso, guida in linea d'aria
-    const wi = st.route.wpIdx[1] ?? st.route.coords.length - 1;
+    const wi = legIdx();
     const left = st.route.cum[wi] - st.route.cum[st.proj];
-    if (tgt && !routing && st.routeK === st.k && left < 20 && m(p, tgt) > ARRIVE_M) {
+    if (tgt && !routing && left < 20 && m(p, tgt) > ARRIVE_M) {
       const key = 'bee' + st.k;
-      if (!st.said.has(key)) { st.said.add(key); say(`Lascia il sentiero: ${tgt.label} è a ${Math.round(m(p, tgt) / 10) * 10} metri verso ${dirName(bearing(p, tgt))}.`, VIB.start); }
+      if (!st.said.has(key)) { st.said.add(key); say(`Lascia il sentiero: ${tgt.label} è a ${roundM(m(p, tgt))} metri verso ${dirName(bearing(p, tgt))}.`, VIB.start); }
       st.beeline = true; st.off = 0;
       opts.onUpdate?.(view()); return;
     }
     st.beeline = false;
 
-    // indicazioni di svolta: preavviso a 60 m, poi alla svolta
-    const h = st.route.hints.find((x) => x.i > st.proj);
+    // indicazioni di svolta (solo nel tratto verso la tappa corrente): preavviso a 60 m, poi alla svolta
+    const h = st.route.hints.find((x) => x.i > st.proj && x.i <= wi);
     if (h) {
       const dh = st.route.cum[h.i] - st.route.cum[st.proj];
       const key = `${h.i}`;
@@ -161,9 +191,22 @@ export function createNav(targets, back, opts) {
     opts.onUpdate?.(view());
   }
 
+  const roundM = (x) => (x >= 1000 ? Math.round(x / 100) * 100 : Math.round(x / 10) * 10);
+  function beeText(p, pre) {
+    const tgt = currentTarget();
+    return tgt ? `${pre} ${tgt.label} a ${roundM(m(p, tgt))} metri verso ${dirName(bearing(p, tgt))}.` : pre;
+  }
+  function beeline(p, tgt) {
+    if (!tgt) return;
+    const dist = m(p, tgt), step = dist > 1000 ? 250 : 100;
+    const bucket = Math.ceil(dist / step);
+    if (st.lastBeeSay == null) st.lastBeeSay = bucket;
+    if (bucket < st.lastBeeSay) { st.lastBeeSay = bucket; say(`${tgt.label} a ${roundM(dist)} metri verso ${dirName(bearing(p, tgt))}.`, VIB.start); }
+  }
+
   function startText() {
     const v = view();
-    return v.target ? `Partiamo. ${v.target.label} a ${Math.round(v.distM / 10) * 10} metri, circa ${v.etaMin} minuti.` : 'Partiamo.';
+    return v.target ? `Partiamo. ${v.target.label} a ${roundM(v.distM)} metri, circa ${v.etaMin} minuti.` : 'Partiamo.';
   }
 
   function view() {
@@ -171,17 +214,18 @@ export function createNav(targets, back, opts) {
     const r = st.route;
     let distM = tgt && st.pos ? m(st.pos, tgt) : null, climb = 0, next = null;
     if (r && tgt && st.pos) {
-      const wi = r.wpIdx[1] ?? r.coords.length - 1; // il percorso parte dalla posizione: la tappa 1 è il bersaglio
+      const wi = legIdx();
       distM = Math.max(0, r.cum[wi] - r.cum[st.proj]) + (st.beeline ? m(st.pos, tgt) : 0);
       for (let i = st.proj + 1; i <= wi; i++) climb += Math.max(0, (r.coords[i].ele ?? 0) - (r.coords[i - 1].ele ?? 0));
       const h = r.hints.find((x) => x.i > st.proj && x.i <= wi);
       if (h) next = { text: TURN[h.cmd], distM: Math.round(r.cum[h.i] - r.cum[st.proj]), side: side(h.cmd) };
     }
+    const bee = tgt && st.pos && (st.beeline || !r);
     return {
       target: tgt, returning: st.k >= st.targets.length, k: st.k, n: st.targets.length,
       distM: distM == null ? null : Math.round(distM), etaMin: distM == null ? null : walkMin(distM, climb),
-      next: st.beeline && tgt && st.pos ? { text: `lascia il sentiero, verso ${dirName(bearing(st.pos, tgt))}`, distM: Math.round(m(st.pos, tgt)), side: null, beeline: true } : next,
-      off: st.off >= 3, pos: st.pos, route: r, visited: st.visited, track: st.track, voice: st.voice,
+      next: bee ? { text: `${r ? 'lascia il sentiero, ' : ''}verso ${dirName(bearing(st.pos, tgt))}`, distM: Math.round(m(st.pos, tgt)), side: null, beeline: true } : next,
+      off: st.off >= 3, offline: !r, weak: st.weak, pos: st.pos, route: r, visited: st.visited, track: st.track, voice: st.voice,
     };
   }
 
@@ -192,7 +236,7 @@ export function createNav(targets, back, opts) {
     setVoice(v) { st.voice = v; },
     skip() { // salta la tappa corrente
       if (st.finished) return;
-      if (st.k < st.targets.length) { st.k++; if (!currentTarget()) { finish('completato'); return; } if (st.pos) reroute(st.pos).then(() => opts.onUpdate?.(view())); }
+      if (st.k < st.targets.length) { st.k++; st.beeline = false; st.lastBeeSay = null; if (!currentTarget()) { finish('completato'); return; } opts.onUpdate?.(view()); }
     },
     stop() { finish('interrotto'); },
     view,

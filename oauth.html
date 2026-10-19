@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cerca Porcini · accesso Google</title>
+  <meta name="robots" content="noindex">
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #E4FDE1; color: #3d3d45; font: 16px/1.5 system-ui, sans-serif; text-align: center; padding: 24px; box-sizing: border-box; }
+    a { display: inline-block; margin-top: 16px; padding: 14px 22px; border-radius: 14px; background: #648381; color: #fff; text-decoration: none; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div>
+    <p id="msg">Accesso a Google completato.</p>
+    <a id="back" href="#">Torna a Cerca Porcini</a>
+  </div>
+  <script>
+    // Pagina di ritorno dell'accesso Google per l'app Android: passa il permesso all'app con il suo indirizzo
+    // speciale (it.cercaporcini.app://oauth). Il permesso resta nell'indirizzo dopo "#" e non arriva a nessun server.
+    var h = location.hash.slice(1);
+    var url = 'it.cercaporcini.app://oauth#' + h;
+    document.getElementById('back').href = url;
+    if (/error=/.test(h)) document.getElementById('msg').textContent = 'Accesso a Google non riuscito o annullato.';
+    location.replace(url);
+  </script>
+</body>
+</html>

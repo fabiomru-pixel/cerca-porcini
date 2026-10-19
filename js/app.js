@@ -367,22 +367,42 @@ function drawFinds() {
 // ---------------------------------------------------------------- posizione
 function locate({ silent = false, center = false } = {}) {
   if (!navigator.geolocation) { if (!silent) toast('GPS non disponibile'); return; }
-  navigator.geolocation.getCurrentPosition((p) => {
-    state.gps = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, alt: p.coords.altitude };
-    kv.set('lastGps', state.gps);
-    if (!state.start || !state.start.manual) state.start = { lat: state.gps.lat, lon: state.gps.lon, manual: false };
+  let best = null, done = false, wid = null, timer = null;
+  const apply = (fx, final) => {
+    state.gps = fx;
+    if (final) kv.set('lastGps', fx);
+    if (!state.start || !state.start.manual) state.start = { lat: fx.lat, lon: fx.lon, manual: false };
     renderStart(); drawMe();
-    if (center) map.setView([state.gps.lat, state.gps.lon], Math.max(map.getZoom(), 12));
+    if (center && final) map.setView([fx.lat, fx.lon], Math.max(map.getZoom(), fx.acc > 300 ? 13 : 15));
+  };
+  const finish = () => {
+    if (done) return;
+    done = true; clearTimeout(timer); if (wid != null) navigator.geolocation.clearWatch(wid);
+    if (!best) { if (!silent) toast('Posizione non disponibile: attiva il GPS'); renderStart(); return; }
+    apply(best, true);
+    if (!silent && best.acc > 100) {
+      toast(best.acc >= 1000
+        ? `Posizione molto approssimativa (±${(best.acc / 1000).toFixed(1)} km): attiva il GPS e la posizione "precisa" per l'app nelle impostazioni del telefono`
+        : `Posizione approssimativa (±${Math.round(best.acc)} m): il GPS non ha ancora un buon segnale, riprova all'aperto`, 8000);
+    }
+  };
+  wid = navigator.geolocation.watchPosition((p) => {
+    const fx = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, alt: p.coords.altitude };
+    if (!best || fx.acc < best.acc) { best = fx; if (!silent) apply(best, false); }
+    if (best.acc <= 25) finish(); // abbastanza preciso: mi fermo
   }, (e) => {
+    if (best) { finish(); return; }
+    done = true; clearTimeout(timer); if (wid != null) navigator.geolocation.clearWatch(wid);
     if (!silent) toast(e.code === 1 ? 'Permesso di posizione negato' : 'Posizione non disponibile');
     renderStart();
-  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+  }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  timer = setTimeout(finish, 15000);
 }
 
 function renderStart() {
   const s = state.start;
   $('#posText').innerHTML = s
-    ? `<b>${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}</b> ${s.manual ? '<span class="pill">scelta sulla mappa</span>' : `<span class="pill ok">GPS ±${Math.round(state.gps?.acc || 0)} m</span>`}`
+    ? `<b>${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}</b> ${s.manual ? '<span class="pill">scelta sulla mappa</span>' : `<span class="pill ${(state.gps?.acc || 0) > 100 ? 'warn' : 'ok'}">GPS ±${Math.round(state.gps?.acc || 0)} m</span>`}`
     : 'Posizione non disponibile: premi il pulsante o tieni premuto sulla mappa.';
 }
 
@@ -998,7 +1018,6 @@ async function completePending() {
 }
 
 async function doSync() {
-  if (NATIVE) { toast('Nell\'app la sincronizzazione con Drive non è ancora disponibile: usa Esporta/Importa backup in Opzioni', 6000); return; }
   if (!state.settings.driveClientId) { switchTab('impostazioni'); $('#driveClientId').focus(); toast('Inserisci prima il Client ID di Google'); return; }
   if (!navigator.onLine) { toast('Sei offline'); return; }
   const btn = $('#syncBtn'); btn.disabled = true;
@@ -1006,7 +1025,7 @@ async function doSync() {
     const r = await syncDrive(state.settings, saveSettings, (t) => progress(t, 0.5));
     await refreshFinds();
     renderSyncStatus();
-    toast(`Sincronizzato: ${r.total} fungaie, ${r.uploaded} foto, ${r.analyses || 0} analisi caricate`);
+    toast(`Sincronizzato: ${r.total} fungaie, ${r.outings || 0} giri, ${r.uploaded} foto, ${r.analyses || 0} analisi`); renderOutings();
   } catch (e) {
     console.error(e);
     const msg = e.name === 'QuotaExceededError' ? 'spazio del browser esaurito: Opzioni → Svuota mappe salvate offline' : (e.message || e.name);
@@ -1119,7 +1138,11 @@ function onOrientation(e) {
 
 function startCarTracking() {
   if (navigator.geolocation && carWatch == null) {
+    let carGood = 0;
     carWatch = navigator.geolocation.watchPosition((p) => {
+      // posizione dalla rete (imprecisa): la ignoro se negli ultimi 2 minuti ne ho avuta una buona dal GPS
+      if (p.coords.accuracy > 60 && Date.now() - carGood < 120000) return;
+      if (p.coords.accuracy <= 60) carGood = Date.now();
       carHere = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy };
       state.gps = { ...carHere, alt: p.coords.altitude };
       drawMe(); drawCar(); updateCarArrow();
@@ -1166,7 +1189,7 @@ function renderCar() {
     $('#carSetGps').onclick = () => {
       if (!navigator.geolocation) { toast('GPS non disponibile'); return; }
       toast('Rilevo la posizione…');
-      navigator.geolocation.getCurrentPosition((p) => setCar({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }),
+      navigator.geolocation.getCurrentPosition((p) => { setCar({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }); if (p.coords.accuracy > 60) toast(`Attenzione: posizione dell'auto approssimativa (±${Math.round(p.coords.accuracy)} m). Riprova tra poco o usa "Centro mappa".`, 7000); },
         () => toast('Posizione non disponibile: usa “Centro mappa”'), { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
     };
     $('#carSetMap').onclick = () => { const m = map.getCenter(); setCar({ lat: m.lat, lon: m.lng }); };
@@ -1300,11 +1323,12 @@ function renderNav(v) {
   }
   const showTurn = v.next && v.next.distM < 250; // freccia e scritta solo per una svolta vicina
   const turnIcon = v.off ? 'x' : showTurn && v.next.side === 'left' ? 'left' : showTurn && v.next.side === 'right' ? 'right' : 'up';
-  const instr = v.off ? 'Fuori percorso: ricalcolo' : !r ? 'Calcolo il percorso…' : v.next && v.next.distM < 250 ? `${navDist(v.next.distM)} · ${v.next.text}` : 'Prosegui sul sentiero';
+  const instr = !v.pos ? 'Cerco il segnale GPS…' : v.off ? 'Fuori percorso' : v.next?.beeline ? `${navDist(v.next.distM)} · ${v.next.text}` : v.next && v.next.distM < 250 ? `${navDist(v.next.distM)} · ${v.next.text}` : 'Prosegui sul sentiero';
+  const flags = [v.offline && v.pos ? 'senza rete: guida in linea d\'aria' : '', v.weak ? 'GPS debole' : ''].filter(Boolean).join(' · ');
   const tgt = v.target ? `${v.returning ? 'Ritorno a' : 'Verso'} ${esc(v.target.label)}` : '';
   $('#navBar').innerHTML = `<div class="nav-main"><div class="nav-turn${v.off ? ' off' : ''}">${icon(turnIcon)}</div>
     <div class="grow"><div class="nav-instr">${instr}</div>
-      <div class="nav-sub">${tgt} · <b>${navDist(v.distM)}</b>${v.etaMin != null ? ` · ~${navDur(v.etaMin)}` : ''}${v.n > 1 ? ` · tappa ${Math.min(v.k + 1, v.n)}/${v.n}` : ''}</div></div></div>${navButtonsHtml()}`;
+      <div class="nav-sub">${tgt} · <b>${navDist(v.distM)}</b>${v.etaMin != null ? ` · ~${navDur(v.etaMin)}` : ''}${v.n > 1 ? ` · tappa ${Math.min(v.k + 1, v.n)}/${v.n}` : ''}</div>${flags ? `<div class="nav-sub" style="color:var(--warn)">${flags}</div>` : ''}</div></div>${navButtonsHtml()}`;
   bindNavButtons();
 }
 
