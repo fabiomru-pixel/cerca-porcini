@@ -77,6 +77,7 @@ function initMap() {
   for (const [k, l] of Object.entries(TILE_LAYERS)) bases[l.name] = layers[k] = L.tileLayer(l.url, l.opts);
   layers.topo.addTo(map);
   layers.suit = L.layerGroup().addTo(map);
+  layers.heat = L.layerGroup().addTo(map);
   layers.contours = L.layerGroup().addTo(map);
   layers.prot = L.layerGroup().addTo(map);
   layers.spots = L.layerGroup().addTo(map);
@@ -85,6 +86,7 @@ function initMap() {
   layers.car = L.layerGroup().addTo(map);
   L.control.layers(bases, {
     'Idoneità (calore)': layers.suit,
+    'Area probabile degli spot': layers.heat,
     'Fascia di quota': layers.contours,
     'Aree protette': layers.prot,
     'Spot consigliati': layers.spots,
@@ -317,7 +319,7 @@ function spotPopup(s) {
 }
 
 function drawAnalysis(a, fit = false) {
-  layers.suit.clearLayers(); layers.contours.clearLayers(); layers.prot.clearLayers(); layers.spots.clearLayers();
+  layers.suit.clearLayers(); layers.heat?.clearLayers(); layers.contours.clearLayers(); layers.prot.clearLayers(); layers.spots.clearLayers();
   if (radiusCircle) { radiusCircle.remove(); radiusCircle = null; } // l'analisi disegna già il suo cerchio
   if (!a) return;
   L.imageOverlay(a.overlay.url, a.overlay.bounds, { opacity: 0.55, interactive: false }).addTo(layers.suit);
@@ -332,6 +334,26 @@ function drawAnalysis(a, fit = false) {
       style: (f) => ({ color: /^I[ab]$/i.test(f.properties.iucnCategory || '') ? '#dc2626' : '#f97316', weight: 1.5, fillOpacity: 0.12, dashArray: '3 3' }),
       onEachFeature: (f, l) => l.bindPopup(`<b>${esc(f.properties.siteName)}</b><br>Area protetta (${esc(f.properties.nationalId || '')}, IUCN ${esc(f.properties.iucnCategory || '-')})<br><span class="muted">Controlla il regolamento: la raccolta può essere vietata o limitata.</span>`),
     }).addTo(layers.prot);
+  }
+  // area probabile attorno a ogni spot: più è intenso il colore, più il punto è promettente
+  layers.heat.clearLayers();
+  const heatR = L.canvas({ padding: 0.3 });
+  const heatColor = (v) => { // da verde salice (meno probabile) a oro e arancio (più probabile)
+    const stops = [[0, [138, 203, 136]], [0.6, [255, 191, 70]], [1, [232, 89, 12]]];
+    const t = Math.max(0, Math.min(1, v));
+    for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+      const [a0, c0] = stops[i - 1], [a1, c1] = stops[i], k = (t - a0) / (a1 - a0);
+      return `rgb(${c0.map((x, j) => Math.round(x + (c1[j] - x) * k)).join(',')})`;
+    }
+    return 'rgb(232,89,12)';
+  };
+  for (const s of a.spots) {
+    if (!s.heat) continue;
+    const r = Math.max(18, (s.heatCell || 30) * 1.05); // cerchi che si sovrappongono: sfumatura continua
+    for (const [la, lo, p] of s.heat) {
+      const v = p / 100;
+      L.circle([la, lo], { renderer: heatR, radius: r, stroke: false, fillColor: heatColor(v), fillOpacity: 0.03 + 0.32 * Math.pow(v, 1.4), interactive: false }).addTo(layers.heat);
+    }
   }
   for (const s of a.spots) {
     const m = L.marker([s.lat, s.lon], {
@@ -522,7 +544,7 @@ async function saveToHistory(a) {
     summary: { meanT: a.summary.meanT, meanMax: a.summary.meanMax, meanMin: a.summary.meanMin, rainTotal: a.summary.rainTotal, soilTheta: a.summary.soilTheta, lastEpisode: a.summary.lastEpisode, timerEpisode: a.summary.timerEpisode },
     clim: a.clim, tc: a.tc, timers: a.timers, scan: a.scan,
     groups: a.groups.map((g) => ({ key: g.key, species: g.species, band: g.band })),
-    spots: a.spots, fungaie: a.fungaie || [], zones: a.zones || [],
+    spots: a.spots.map(({ heat, ...sp }) => sp), fungaie: a.fungaie || [], zones: a.zones || [], // senza le aree colorate (pesanti)
     app: APP_VERSION, uploaded: false,
   };
   try {
@@ -687,9 +709,12 @@ async function saveOfflineArea() {
     }
   };
   addArea(a.center.lat, a.center.lon, Math.min(a.radius, 30), [9, 10, 11]);
-  for (const s of a.spots.slice(0, 20)) addArea(s.lat, s.lon, 1.2, [12, 13, 14, 15]);
+  for (const s of a.spots.slice(0, 25)) addArea(s.lat, s.lon, 1.2, [12, 13, 14, 15]);
+  // zoom 16 sull'area colorata attorno agli spot (la si guarda da vicino, anche senza campo)
+  for (const s of a.spots.slice(0, 25)) addArea(s.lat, s.lon, 0.6, [16]);
   for (const f of state.finds.filter((f) => distKm(a.center, f) <= a.radius)) addArea(f.lat, f.lon, 0.8, [13, 14, 15]);
-  const list = [...want].slice(0, 800);
+  const MAX_TILES = 2500; // circa 50–80 MB: mappe di tutte le aree colorate fino allo zoom 16
+  const list = [...want].slice(0, MAX_TILES);
   const cache = await caches.open('cp-tiles-v2');
   let done = 0;
   progress('Salvo le mappe per l’uso offline…', 0);
@@ -704,12 +729,12 @@ async function saveOfflineArea() {
         }
       } catch { /* salta la tile */ }
       done++;
-      progress(`Salvo le mappe per l’uso offline… ${done}/${Math.min(800, want.size)}`, done / Math.min(800, want.size));
+      progress(`Salvo le mappe per l’uso offline… ${done}/${Math.min(MAX_TILES, want.size)}`, done / Math.min(MAX_TILES, want.size));
     }
   };
   await Promise.all([worker(), worker(), worker(), worker()]);
   progress(null);
-  toast(`Area di lavoro salvata (${done} riquadri di mappa). Spot e fungaie restano disponibili offline.`, 4500);
+  toast(`Area di lavoro salvata (${done} riquadri di mappa). Spot, aree colorate e fungaie restano disponibili anche senza campo.`, 5000);
   updateStorageInfo();
 }
 

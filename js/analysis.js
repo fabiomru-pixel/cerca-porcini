@@ -326,6 +326,14 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       if (out.length >= 3) break;
       if (out.every((o) => distKm(o, x) >= 0.4)) out.push(x);
     }
+    // area dello spot: i punti entro 500 m con almeno il 60% del suo valore (per la colorazione sulla mappa)
+    for (const o of out) {
+      o.heat = cells
+        .filter((x) => x.fin >= 0.6 * o.fin && distKm(o, x) <= 0.5)
+        .slice(0, 700)
+        .map((x) => [Math.round(x.lat * 1e5) / 1e5, Math.round(x.lon * 1e5) / 1e5, Math.round(Math.max(0, Math.min(1, (x.fin / o.fin - 0.6) / 0.4)) * 100)]); // 0 = 60% dello spot, 100 = come lo spot
+      o.heatCell = Math.round(st * mppF); // passo della griglia in metri
+    }
     return out.length ? out : [c];
   };
 
@@ -472,6 +480,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         tLocal: Math.round(best.pl.tLocal * 10) / 10,
         forest: FORESTS[fk].label,
         forestType: c.patch ? `${c.patch.type}, copertura ${Math.round(c.patch.frac * 100)}%` : null,
+        heat: c.heat || null, heatCell: c.heatCell || 30,
         edge: edge > 1,
         rainTotal: Math.round(tm.rainTotal),
         daysSince: tm.daysSince,
