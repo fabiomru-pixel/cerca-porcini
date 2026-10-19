@@ -34,7 +34,7 @@ export async function installUpdate(onProgress) {
   if (!fs || !opener) throw new Error('Aggiornamento automatico non disponibile in questa versione: scaricala dal link della release');
   const path = 'CercaPorcini-aggiornamento.apk';
   let sub = null;
-  if (onProgress) sub = await fs.addListener('progress', (p) => { if (p.contentLength) onProgress(p.bytes / p.contentLength); });
+  if (onProgress) sub = await Promise.resolve(fs.addListener('progress', (p) => { if (p.contentLength) onProgress(p.bytes / p.contentLength); }));
   try {
     const res = await fs.downloadFile({ url: APK_URL, path, directory: 'CACHE', progress: !!onProgress });
     const uri = res.path || (await fs.getUri({ path, directory: 'CACHE' })).uri;

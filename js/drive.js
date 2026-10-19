@@ -18,7 +18,8 @@ async function nativeToken(clientId) {
   return new Promise((resolve, reject) => {
     let done = false, subUrl = null, subClose = null;
     const end = () => { done = true; subUrl?.remove?.(); subClose?.remove?.(); };
-    App.addListener('appUrlOpen', async (ev) => {
+    // nell'app i plugin possono restituire l'aggancio subito o con una promessa: Promise.resolve copre entrambi
+    Promise.resolve(App.addListener('appUrlOpen', async (ev) => {
       if (done || !ev.url || !ev.url.startsWith('it.cercaporcini.app://oauth')) return;
       end();
       try { await Browser.close(); } catch { /* già chiuso */ }
@@ -28,12 +29,12 @@ async function nativeToken(clientId) {
       token = p.get('access_token'); tokenExp = Date.now() + Number(p.get('expires_in') || 3600) * 1000;
       localStorage.setItem('cp-drive-consent', '1');
       resolve(token);
-    }).then((h) => { subUrl = h; });
-    Browser.addListener('browserFinished', () => {
+    })).then((h) => { subUrl = h; });
+    Promise.resolve(Browser.addListener('browserFinished', () => {
       // chiuso a mano senza completare l'accesso
       setTimeout(() => { if (!done) { end(); reject(new Error('Accesso Google annullato')); } }, 2000);
-    }).then((h) => { subClose = h; });
-    Browser.open({ url }).catch((e) => { end(); reject(e); });
+    })).then((h) => { subClose = h; });
+    Promise.resolve().then(() => Browser.open({ url })).catch((e) => { end(); reject(e); });
   });
 }
 
