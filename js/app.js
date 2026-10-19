@@ -11,7 +11,7 @@ import {
   createPlace, addVisit, updateVisit, updatePlace, deleteFind, listFinds, processPending, computeLearn,
   normalizeFind, placeSummary, visitOffset, predictPlace, migrateFinds, AGES, STATES,
 } from './finds.js';
-import { syncDrive, hasToken } from './drive.js';
+import { syncDrive, hasToken, uploadBackup, listBackups, downloadBackup } from './drive.js';
 import { lon2px, lat2px, distKm, bearing, fmtDist, parseCoords, ASPECT_NAME } from './geo.js';
 import { addDays } from './engine.js';
 import { REGIMES } from './climate.js';
@@ -1090,7 +1090,44 @@ async function buildBackup() {
 }
 async function exportBackup() {
   const blob = new Blob([JSON.stringify(await buildBackup())], { type: 'application/json' });
-  download(blob, `cerca-porcini-backup-${todayStr()}.json`);
+  const name = `cerca-porcini-backup-${todayStr()}.json`;
+  if (!NATIVE) download(blob, name);
+  // copia anche su Drive, così dall'altro dispositivo basta "Importa da Drive"
+  if (!state.settings.driveClientId) { if (NATIVE) toast('Configura Google Drive per salvare il backup'); return; }
+  try {
+    progress('Salvo il backup su Drive…', 0.5);
+    const t = new Date(); const pad = (n) => String(n).padStart(2, '0');
+    await uploadBackup(state.settings, saveSettings, blob, `cerca-porcini-backup-${todayStr()}-ore${pad(t.getHours())}${pad(t.getMinutes())}-${NATIVE ? 'telefono' : 'sito'}.json`);
+    toast('Backup salvato anche su Drive (cartella Cerca Porcini/backup)');
+  } catch (e) { toast('Backup su Drive non riuscito: ' + e.message); }
+  finally { progress(null); }
+}
+
+async function importFromDrive() {
+  if (!state.settings.driveClientId) return toast('Configura prima Google Drive (Impostazioni)');
+  let list;
+  try { progress('Cerco i backup su Drive…', 0.5); list = await listBackups(state.settings, saveSettings); }
+  catch (e) { return toast('Drive: ' + e.message); }
+  finally { progress(null); }
+  const f = $('#outForm');
+  f.innerHTML = `<h2>Importa da Drive</h2>
+    ${list.length ? `<p class="small muted">Backup salvati con “Esporta backup” (il più recente in alto):</p>
+      ${list.map((b) => `<button class="btn block" style="margin-bottom:6px;text-align:left" value="${esc(b.id)}"><b>${new Date(b.modifiedTime).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}</b> · ${esc(/telefono/.test(b.name) ? 'dal telefono' : /sito/.test(b.name) ? 'dal sito' : b.name)} · ${(Number(b.size || 0) / 1048576).toFixed(1)} MB</button>`).join('')}`
+    : `<p>Su Drive non c'è ancora nessun backup. Apri Cerca Porcini sull'altro dispositivo e premi <b>Esporta backup</b>: verrà salvato anche su Drive.</p>`}
+    <button class="btn block" value="">Annulla</button>`;
+  const dlg = $('#outDlg');
+  dlg.onclose = async () => {
+    const id = dlg.returnValue; dlg.onclose = null;
+    if (!id) return;
+    try {
+      progress('Scarico il backup da Drive…', 0.5);
+      const blob = await downloadBackup(id);
+      progress(null);
+      await importBackup(blob);
+    } catch (e) { progress(null); toast('Import non riuscito: ' + e.message); }
+  };
+  dlg.returnValue = '';
+  dlg.showModal();
 }
 async function importBackup(file) {
   if (!file) return;
@@ -1617,6 +1654,7 @@ function bindUI() {
 
   $('#exportBtn').onclick = exportBackup;
   $('#importBtn').onclick = () => $('#importFile').click();
+  $('#importDriveBtn').onclick = importFromDrive;
   $('#importFile').onchange = async (e) => { try { await importBackup(e.target.files[0]); } catch (err) { toast('Import non riuscito: ' + err.message); } e.target.value = ''; };
   $('#clearTilesBtn').onclick = async () => { await caches.delete('cp-tiles-v2'); toast('Mappe offline eliminate'); updateStorageInfo(); };
   $('#versionInfo').textContent = `Versione ${APP_VERSION}${NATIVE ? ' · app Android' : ''}`;

@@ -112,6 +112,29 @@ async function uploadFile({ id, name, parent, blob, mime }) {
   return r.id;
 }
 
+// Backup su Drive (cartella "Cerca Porcini/backup"): si salva da un dispositivo e si riprende dall'altro
+// senza cercare il file nella memoria del telefono. Con il permesso drive.file l'app vede solo i backup
+// salvati da Cerca Porcini (sito o app), non file copiati a mano su Drive.
+async function backupFolder(settings, saveSettings) {
+  await getToken(settings.driveClientId);
+  const root = settings.driveFolderId || await ensureFolder(FOLDER_NAME);
+  if (root !== settings.driveFolderId) await saveSettings({ driveFolderId: root });
+  return ensureFolder('backup', root);
+}
+export async function uploadBackup(settings, saveSettings, blob, name) {
+  const dir = await backupFolder(settings, saveSettings);
+  return uploadFile({ name, parent: dir, blob });
+}
+export async function listBackups(settings, saveSettings) {
+  const dir = await backupFolder(settings, saveSettings);
+  const q = `'${dir}' in parents and trashed=false`;
+  const r = await (await api(`/files?${new URLSearchParams({ q, orderBy: 'modifiedTime desc', pageSize: '30', fields: 'files(id,name,modifiedTime,size)', spaces: 'drive' })}`)).json();
+  return r.files || [];
+}
+export async function downloadBackup(id) {
+  return (await api(`/files/${id}?alt=media`)).blob();
+}
+
 // Sincronizzazione bidirezionale: vince la versione modificata più di recente
 export async function syncDrive(settings, saveSettings, onStep = () => {}) {
   await getToken(settings.driveClientId);
