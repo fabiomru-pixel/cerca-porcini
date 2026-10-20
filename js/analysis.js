@@ -434,9 +434,9 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
 
   // chioma rada: luce a terra, sottobosco di rovi e arbusti, porcini più rari. Margini e radure valgono
   // il bonus solo se attorno la chioma resta fitta.
-  // Solo dove i rovi crescono davvero: rovo comune e prugnolo sono quasi tutti sotto i 900 m (segnalazioni
-  // italiane GBIF), rari oltre 1100 m; più su restano rovo delle faggete e lampone, bassi e attraversabili.
-  const thornW = (elev) => (elev <= 900 ? 1 : elev >= 1300 ? 0 : (1300 - elev) / 400);
+  // Solo dove i rovi crescono davvero (quote scelte dall'utente): penalità piena (−18%) fino a 600 m,
+  // −5% a 900 m, nessuna da 1000 m in su.
+  const thornW = (elev) => (elev <= 600 ? 1 : elev <= 900 ? 1 - ((elev - 600) / 300) * (13 / 18) : elev >= 1000 ? 0 : (5 / 18) * ((1000 - elev) / 100));
   const canopyF = (cp, elev) => {
     if (!cp || cp.mean >= 75) return 1;
     const f = cp.mean <= 45 ? 0.82 : 0.82 + (0.18 * (cp.mean - 45)) / 30;
