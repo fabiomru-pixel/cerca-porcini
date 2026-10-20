@@ -1,7 +1,7 @@
 // Regole di base (dalle slide) e parametri predefiniti.
 // Tutto ciò che è "regolabile" finisce nelle impostazioni utente (db 'settings').
 
-export const APP_VERSION = '1.27.0';
+export const APP_VERSION = '1.28.0';
 
 export const DEFAULT_SETTINGS = {
   gradient: 0.6,          // °C ogni 100 m (regolabile 0,6–0,7)
@@ -103,6 +103,11 @@ export const FOREST_TYPE_URL =
 export const BUILT_UP_URL =
   'https://image.discomap.eea.europa.eu/arcgis/rest/services/GioLandPublic/HRL_BuiltUp_2018/ImageServer/exportImage';
 export const BUILT_MIN_M = 180; // spot ad almeno ~150 m da case e paesi (margine per la griglia di calcolo)
+
+// Copernicus High Resolution Layer "Tree Cover Density 2018" (10 m): % di chioma. Bosco rado = luce a terra = rovi
+export const TREE_COVER_URL =
+  'https://image.discomap.eea.europa.eu/arcgis/rest/services/GioLandPublic/HRL_TreeCoverDensity_2018/ImageServer/exportImage';
+export const BLOCK_KM = 0.15; // raggio escluso attorno a uno spot segnato come inaccessibile
 
 export const EEA_PROTECTED_URL =
   'https://bio.discomap.eea.europa.eu/arcgis/rest/services/ProtectedSites/CDDA_Dyna_WM/MapServer/3/query';

@@ -287,6 +287,13 @@ export async function processPending(settings) {
     const migrated = place !== raw;
     let changed = migrated;
     try {
+      // quota non valida (salvata con poco segnale): rifaccio terreno e dati meteo dei ritrovamenti
+      if (place.elevation != null && !(place.elevation > -500)) {
+        place.elevation = null; place.slope = null; place.aspect = null; place.aspectLabel = null;
+        place.pending = { ...(place.pending || {}), terrain: true };
+        for (const v of place.visits) { v.snapshot = null; v.pending = { ...(v.pending || {}), snapshot: true }; }
+        changed = true;
+      }
       if (place.pending?.terrain) {
         const t = await terrainAtPoint(place.lat, place.lon);
         place.elevation = Math.round(t.elevation); place.slope = Math.round(t.slope); place.aspect = Math.round(t.aspect);
@@ -332,6 +339,7 @@ export function computeLearn(allFinds) {
   for (const raw of allFinds) {
     if (!raw || raw.deleted) continue;
     const place = normalizeFind(raw);
+    if (place.elevation != null && !(place.elevation > -500)) continue;
     for (const v of place.visits || []) if (v.snapshot && !isOther(v)) entries.push({ place, v, s: v.snapshot, pos: isPositive(v) });
   }
   const pos = entries.filter((e) => e.pos), neg = entries.filter((e) => !e.pos);

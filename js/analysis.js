@@ -1,8 +1,8 @@
 // Analisi completa: meteo + altimetria + bosco + regole -> mappa di idoneità e spot consigliati
-import { GROUPS, FORESTS, SPECIES, BUILT_MIN_M } from './config.js';
+import { GROUPS, FORESTS, SPECIES, BUILT_MIN_M, BLOCK_KM } from './config.js';
 import { loadMosaic, terrainAtPoint } from './dem.js';
 import { fetchDaily } from './weather.js';
-import { forestRaster, forestPatch, fetchProtected, protectedAt, builtRaster, nearBuiltGrid } from './sources.js';
+import { forestRaster, forestPatch, fetchProtected, protectedAt, builtRaster, nearBuiltGrid, canopyPatch } from './sources.js';
 import { distKm, bboxAround, aspectLabel, metersPerPixel, ASPECT_DEG, angDiff } from './geo.js';
 import { contourLines } from './contours.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
@@ -70,7 +70,9 @@ const combine = (place, tm, season, bonus, hot, sh, slope) => finalScore(Math.mi
   * staleFactor(tm.lastRainDays, hot, tm.staleDays) * (tm.weakRain ? WEAK_RAIN_FACTOR : 1)
   * (tm.sat ? saturationFactor(tm.sat, tm.sat.idx, slope) : 1);
 
-export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], empties = [], onStep = () => {} }) {
+export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], empties = [], blocked = [], onStep = () => {} }) {
+  // spot che hai segnato come inaccessibili (rovi, recinti, dirupi): l'area attorno resta fuori
+  const isBlocked = (p) => blocked.some((b) => distKm(b, p) < BLOCK_KM);
   const radius = s.radiusKm;
   const center = { lat, lon };
   const aspectTarget = s.aspectPref && s.aspectPref !== 'auto' ? ASPECT_DEG[s.aspectPref] : null;
@@ -213,6 +215,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       if (builtNear && builtNear[k]) continue;      // troppo vicino a case e paesi
       const px = ox * stride;
       const ll = { lat: rowLat, lon: mosaic.toLatLon(px, py).lon };
+      if (blocked.length && isBlocked(ll)) continue;
       if (distKm(center, ll) > radius) continue;
       const elevation = mosaic.at(px, py);
       if (elevation < 50 || elevation > 2100) continue;
@@ -295,6 +298,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         const px = fx * st, py = fy * st;
         const ll = m.toLatLon(px, py);
         if (distKm(c, ll) > R || distKm(center, ll) > radius) continue;
+        if (blocked.length && isBlocked(ll)) continue;
         const k = fy * FW + fx;
         if (frac && frac[k] < 0.5) continue;
         if (builtF && builtF[k]) continue; // case e paesi
@@ -408,6 +412,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const c = queue2.shift();
       if (!c.fine) { try { const t = await terrainAtPoint(c.lat, c.lon); if (t.elevation > 0) Object.assign(c, t); } catch { /* dato della prima passata */ } }
       try { c.patch = await forestPatch(c.lat, c.lon); } catch { c.patch = null; }
+      try { c.canopy = await canopyPatch(c.lat, c.lon); } catch { c.canopy = null; }
     }
   }));
 
@@ -427,8 +432,12 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   }
   try { protectedFc = await fetchProtected(pbb); } catch { protectedFc = null; }
 
+  // chioma rada: luce a terra, sottobosco di rovi e arbusti, porcini più rari. Margini e radure valgono
+  // il bonus solo se attorno la chioma resta fitta.
+  const canopyF = (cp) => (!cp ? 1 : cp.mean >= 75 ? 1 : cp.mean <= 45 ? 0.82 : 0.82 + (0.18 * (cp.mean - 45)) / 30);
   const ranked = picked
     .filter((c) => !c.patch || c.patch.frac >= 0.25)
+    .filter((c) => !isBlocked(c))
     // con il terreno di dettaglio l'esposizione può cambiare: tolleranza un po' più larga
     .filter((c) => aspectTarget == null || (c.slope >= 3 && angDiff(c.aspect, aspectTarget) <= 40))
     .map((c) => {
@@ -440,13 +449,13 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const tm = evalTiming(w, date, s, fk, c.elevation, learn);
       // suolo secco conta come "piogge scarse" anche se nei 20 giorni è caduta la quantità minima
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
-      const edge = c.patch && c.patch.frac > 0.3 && c.patch.frac < 0.85 ? 1.08 : 1;
+      const edge = c.patch && c.patch.frac > 0.3 && c.patch.frac < 0.85 && (!c.canopy || c.canopy.mean >= 75) ? 1.08 : 1;
       const wet = c.wet || wetMain.at(c.lat, c.lon);
       const sh = shelterOf(wet.m, c.aspect, c.slope);
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation: c.elevation, slope: c.slope, aspect: c.aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
-        let bonus = edge;
+        let bonus = edge * canopyF(c.canopy);
         bonus *= nearFindBonus(c);
         bonus *= emptyFactor(c, tm);
         const fin = combine(pl.score, tm, g.weight, bonus, hot, sh, c.slope);
@@ -482,6 +491,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         forestType: c.patch ? `${c.patch.type}, copertura ${Math.round(c.patch.frac * 100)}%` : null,
         heat: c.heat || null, heatCell: c.heatCell || 30,
         edge: edge > 1,
+        canopy: c.canopy ? { mean: Math.round(c.canopy.mean), open: Math.round(c.canopy.open * 100) } : null,
         rainTotal: Math.round(tm.rainTotal),
         daysSince: tm.daysSince,
         killers: tm.killers,
@@ -533,7 +543,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   for (const place of finds.filter((f) => f.lat != null && distKm(center, f) <= radius)) {
     try {
       let { elevation, slope, aspect } = place;
-      if (elevation == null || slope == null || aspect == null) ({ elevation, slope, aspect } = await terrainAtPoint(place.lat, place.lon));
+      if (!(elevation > -500) || slope == null || aspect == null) ({ elevation, slope, aspect } = await terrainAtPoint(place.lat, place.lon));
       let fk = place.forestKey;
       let patch = null;
       if (!fk) {

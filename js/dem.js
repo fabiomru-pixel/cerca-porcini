@@ -2,9 +2,16 @@
 import { DEM_URL } from './config.js';
 import { lon2px, lat2px, px2lon, px2lat, metersPerPixel, bboxAround } from './geo.js';
 
-async function fetchTile(z, x, y) {
-  const res = await fetch(DEM_URL(z, x, y), { mode: 'cors' });
-  if (!res.ok) throw new Error(`DEM ${z}/${x}/${y}: ${res.status}`);
+async function fetchTile(z, x, y, tries = 3) {
+  let res;
+  for (let i = 0; ; i++) {
+    try {
+      res = await fetch(DEM_URL(z, x, y), { mode: 'cors', signal: AbortSignal.timeout(15000) });
+      if (res.ok) break;
+      if (res.status < 500 || i >= tries - 1) throw new Error(`DEM ${z}/${x}/${y}: ${res.status}`);
+    } catch (e) { if (i >= tries - 1) throw e; } // poco segnale: riprovo
+    await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+  }
   const bmp = await createImageBitmap(await res.blob());
   const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(256, 256) : Object.assign(document.createElement('canvas'), { width: 256, height: 256 });
   const ctx = c.getContext('2d', { willReadFrequently: true });
@@ -92,5 +99,8 @@ export async function loadMosaic(lat, lon, radiusKm, { maxTiles = 64, maxZoom = 
 // Terreno per un singolo punto (quota, pendenza, esposizione) a zoom 13 (~15 m/pixel in Toscana)
 export async function terrainAtPoint(lat, lon) {
   const m = await loadMosaic(lat, lon, 0.3, { maxTiles: 4, maxZoom: 13 });
-  return m.terrainAt(lat, lon, 2);
+  const t = m.terrainAt(lat, lon, 2);
+  // un tile non scaricato vale -9999: meglio nessun dato (si riprova più tardi) che una quota finta
+  if (!(t.elevation > -500 && t.elevation < 5000)) throw new Error('Quota non disponibile: riprovo quando c’è rete');
+  return t;
 }

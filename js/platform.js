@@ -38,6 +38,29 @@ export async function vibrate(pattern) {
   } catch (e) { console.warn('vibrazione', e); }
 }
 
+// ---- una posizione precisa: ascolto il GPS finché la precisione scende sotto `good` metri o scade il tempo,
+// e tengo la migliore. La prima risposta del telefono è spesso la stima da celle telefoniche (km di errore).
+export function preciseFix({ good = 20, timeout = 30000, onUpdate } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('GPS non disponibile')); return; }
+    const t0 = Date.now();
+    let best = null, done = false, id = null, timer = null;
+    const end = (err) => {
+      if (done) return; done = true;
+      if (id != null) navigator.geolocation.clearWatch(id);
+      clearTimeout(timer);
+      if (best) resolve(best); else reject(err || new Error('Posizione non disponibile'));
+    };
+    id = navigator.geolocation.watchPosition((p) => {
+      if (p.timestamp && p.timestamp < t0 - 3000) return; // posizione vecchia rimasta in memoria
+      const f = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy };
+      if (!best || f.acc < best.acc) { best = f; onUpdate?.(best); }
+      if (best.acc <= good) end();
+    }, (e) => { if (e.code === 1) end(new Error('Permesso di posizione negato')); }, { enableHighAccuracy: true, maximumAge: 0, timeout });
+    timer = setTimeout(() => end(), timeout);
+  });
+}
+
 // ---- posizione continua: nell'app anche a schermo spento (servizio in primo piano con notifica fissa)
 // cb({ lat, lon, acc, heading, speed, time }) · restituisce una funzione per fermare
 export async function watchPosition(cb, onError) {

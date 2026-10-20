@@ -1,5 +1,5 @@
 // Fonti esterne: bosco (Copernicus HRL Forest Type, 10 m) e aree protette (EEA – elenco ufficiale EUAP)
-import { FOREST_TYPE_URL, EEA_PROTECTED_URL, BUILT_UP_URL } from './config.js';
+import { FOREST_TYPE_URL, EEA_PROTECTED_URL, BUILT_UP_URL, TREE_COVER_URL } from './config.js';
 import { pointInPolygon, lon2px, lat2px } from './geo.js';
 
 const HALF = 20037508.342789244;
@@ -85,6 +85,35 @@ export async function forestPatch(lat, lon, r = 150, n = 30) {
   for (const c of codes) { if (c === 1) broad++; else if (c === 2) conif++; }
   const frac = (broad + conif) / codes.length;
   return { frac, broad: broad / codes.length, conif: conif / codes.length, center: centerCode, type: broad >= conif ? 'latifoglie' : 'conifere' };
+}
+
+// Chioma degli alberi entro r metri (0-100 %): media e quota di pixel radi (<50 %).
+// Il BMP senza simbologia ha una tavolozza in scala di grigi, quindi il rosso del pixel è il valore.
+export async function canopyPatch(lat, lon, r = 60, n = 13) {
+  const z = 18;
+  const mercRes = (2 * HALF) / (256 * 2 ** z);
+  const cx = lon2px(lon, z), cy = lat2px(lat, z);
+  const d = r / (mercRes * Math.cos((lat * Math.PI) / 180));
+  const p = new URLSearchParams({
+    bbox: `${pxToM(cx - d, z)},${pyToM(cy + d, z)},${pxToM(cx + d, z)},${pyToM(cy - d, z)}`, bboxSR: '3857', imageSR: '3857',
+    size: `${n},${n}`, format: 'bmp', interpolation: 'RSP_NearestNeighbor', renderingRule: '{"rasterFunction":"None"}', f: 'image',
+  });
+  const res = await fetch(`${TREE_COVER_URL}?${p}`);
+  if (!res.ok) throw new Error(`Chioma: ${res.status}`);
+  const bmp = await createImageBitmap(await res.blob());
+  const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(n, n) : Object.assign(document.createElement('canvas'), { width: n, height: n });
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0, n, n);
+  const px = ctx.getImageData(0, 0, n, n).data;
+  let sum = 0, cnt = 0, open = 0;
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    if (Math.hypot(x - (n - 1) / 2, y - (n - 1) / 2) > (n - 1) / 2) continue; // cerchio
+    const v = px[(y * n + x) * 4];
+    if (v > 100) continue; // fuori copertura
+    sum += v; cnt++; if (v < 50) open++;
+  }
+  if (cnt < 5) return null;
+  return { mean: sum / cnt, open: open / cnt };
 }
 
 // Aree protette nazionali/regionali nel riquadro (poligoni semplificati)

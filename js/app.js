@@ -1,7 +1,7 @@
-import { DEFAULT_SETTINGS, TILE_LAYERS, GROUPS, SPECIES, FORESTS, APP_VERSION } from './config.js';
+import { DEFAULT_SETTINGS, TILE_LAYERS, GROUPS, SPECIES, FORESTS, APP_VERSION, BLOCK_KM } from './config.js';
 import { kv, finds as fdb, photos as pdb } from './db.js';
 import { icon } from './icons.js';
-import { NATIVE } from './platform.js';
+import { preciseFix, NATIVE } from './platform.js';
 import { createNav, walkMin } from './nav.js';
 import { checkUpdate, installUpdate } from './update.js';
 import { initSafety, markDirty, markSynced, dirtySince, localBackup, photoToGallery } from './safety.js';
@@ -101,6 +101,8 @@ function initMap() {
     if (b) b.onclick = () => { map.closePopup(); openView(b.dataset.openPlace); };
     const ws = e.popup.getElement()?.querySelector('[data-walk-spot]');
     if (ws) ws.onclick = () => { map.closePopup(); walkToSpot(ws.dataset.walkSpot); };
+    const bs = e.popup.getElement()?.querySelector('[data-block-spot]');
+    if (bs) bs.onclick = () => blockSpot(bs.dataset.blockSpot);
     const wz = e.popup.getElement()?.querySelector('[data-walk-zone]');
     if (wz) wz.onclick = () => { map.closePopup(); walkZone(wz.dataset.walkZone); };
   });
@@ -293,7 +295,7 @@ function spotPopup(s) {
   const pinBg = s.fungaia ? 'var(--charcoal)' : scoreColor(s.score), pinFg = s.fungaia ? 'var(--gold)' : scoreFg(s.score);
   // dettagli: tutto ciò che spiega il voto, a richiesta
   const details = [
-    `${esc(s.forest)}${s.edge ? ' · margine o radura' : ''}`,
+    `${esc(s.forest)}${s.edge ? ' · margine o radura' : ''}${s.canopy ? ` · chioma ${s.canopy.mean}%${s.canopy.mean < 60 ? ' (rada: possibili rovi)' : ''}` : ''}`,
     s.fungaia ? `${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}` : '',
     s.micro ? `<span style="color:var(--ok)">${microText(s.micro)}</span>` : '',
     s.nearEmpty ? `<span style="color:var(--warn)">Uscita a vuoto a ${s.nearEmpty.m} m il ${itDate(s.nearEmpty.date)}: voto ridotto</span>` : '',
@@ -314,7 +316,8 @@ function spotPopup(s) {
     </div>
     ${z ? `<a class="btn small block" style="margin-top:6px" target="_blank" rel="noopener" href="${zoneTourUrl(z, state.analysis)}">${icon('nav')} Giro della zona su Mapy</a>` : ''}
     ${navButtons(s.lat, s.lon, { small: true })}
-    <details class="pop-more"><summary>Dettagli</summary>${details}${scoreBreakdown(s)}</details>
+    <details class="pop-more"><summary>Dettagli</summary>${details}${scoreBreakdown(s)}
+      ${s.fungaia ? '' : `<button class="btn small block" style="margin-top:8px" data-block-spot="${s.id}">Spot inaccessibile (rovi, recinti…)</button>`}</details>
     ${s.fungaia ? `<button class="btn small block" style="margin-top:6px" data-open-place="${s.placeId}">Apri la scheda della fungaia</button>` : ''}`;
 }
 
@@ -448,6 +451,36 @@ function renderControls() {
   $('#driveClientId').value = s.driveClientId || '';
 }
 
+// spot irraggiungibile: tolgo l'area (150 m) da questa e dalle prossime analisi
+async function blockSpot(id) {
+  const a = state.analysis, s = a?.spots.find((x) => x.id === id);
+  if (!s || !confirm(`Segno lo spot ${id} come inaccessibile?\n\nL'area entro ${Math.round(BLOCK_KM * 1000)} m non verrà più proposta. Puoi annullare dalle Opzioni.`)) return;
+  map.closePopup();
+  state.blocked = [...(state.blocked || []), { lat: s.lat, lon: s.lon, at: new Date().toISOString() }];
+  await kv.set('blocked', state.blocked);
+  a.spots = a.spots.filter((x) => x.id !== id);
+  for (const z of a.zones || []) z.spots = z.spots.filter((x) => x !== id);
+  const gone = new Set((a.zones || []).filter((z) => z.spots.length < 2).map((z) => z.id));
+  a.zones = (a.zones || []).filter((z) => !gone.has(z.id));
+  for (const x of a.spots) if (gone.has(x.zone)) x.zone = null;
+  await kv.set('lastAnalysis', a);
+  drawAnalysis(a); renderResults(); renderSpots(); renderBlocked();
+  toast(`Spot ${id} escluso`);
+}
+
+function renderBlocked() {
+  const box = $('#blockedInfo');
+  if (!box) return;
+  const n = (state.blocked || []).length;
+  box.hidden = !n;
+  if (!n) return;
+  box.innerHTML = `<label>Spot inaccessibili esclusi</label><div class="btn-row"><span class="muted small" style="align-self:center">${n} ${n === 1 ? 'area esclusa' : 'aree escluse'}</span><button class="btn small" id="blockedReset">Ripristina</button></div>`;
+  $('#blockedReset').onclick = async () => {
+    if (!confirm('Ripristinare tutte le aree segnate come inaccessibili? Torneranno alla prossima analisi.')) return;
+    state.blocked = []; await kv.set('blocked', []); renderBlocked(); toast('Aree ripristinate');
+  };
+}
+
 async function run() {
   if (!state.start) { toast('Serve una posizione di partenza'); locate(); return; }
   if (!navigator.onLine) { toast('Serve la connessione per calcolare. Offline vedi l’ultima analisi salvata.'); return; }
@@ -460,6 +493,7 @@ async function run() {
       settings: state.settings, learn: state.learn, finds: productive,
       empties: state.finds.flatMap((f) => (f.visits || []).filter((v) => !(v.count > 0) && v.kind !== 'altro' && v.datetime)
         .map((v) => ({ lat: f.lat, lon: f.lon, date: v.datetime.slice(0, 10) }))),
+      blocked: state.blocked || [],
       onStep: (t, p) => progress(t, p),
     });
     state.analysis = a;
@@ -1301,12 +1335,7 @@ function renderCar() {
         <button class="btn primary" id="carSetGps">${icon('crosshair')} Sono all’auto</button>
         <button class="btn" id="carSetMap">${icon('pin')} Centro mappa</button>
       </div>`;
-    $('#carSetGps').onclick = () => {
-      if (!navigator.geolocation) { toast('GPS non disponibile'); return; }
-      toast('Rilevo la posizione…');
-      navigator.geolocation.getCurrentPosition((p) => { setCar({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }); if (p.coords.accuracy > 60) toast(`Attenzione: posizione dell'auto approssimativa (±${Math.round(p.coords.accuracy)} m). Riprova tra poco o usa "Centro mappa".`, 7000); },
-        () => toast('Posizione non disponibile: usa “Centro mappa”'), { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
-    };
+    $('#carSetGps').onclick = () => saveCarHere($('#carSetGps'));
     $('#carSetMap').onclick = () => { const m = map.getCenter(); setCar({ lat: m.lat, lon: m.lng }); };
     return;
   }
@@ -1329,15 +1358,29 @@ function renderCar() {
     if (pts.length > 1) map.fitBounds(pts, { padding: [60, 60], maxZoom: 17 }); else map.setView(pts[0], 16);
     if (innerWidth < 900) setSheet('peek');
   };
-  $('#carMove').onclick = () => {
-    if (!carHere) { toast('Aspetto il GPS…'); return; }
-    if (confirm('Spostare l’auto nella tua posizione attuale?')) setCar(carHere);
-  };
+  $('#carMove').onclick = () => { if (confirm('Spostare l’auto nella tua posizione attuale?')) saveCarHere($('#carMove')); };
   $('#carDel').onclick = async () => {
     if (!confirm('Rimuovere la posizione dell’auto?')) return;
     state.car = null; await kv.del('car'); drawCar(); renderCar();
   };
   updateCarArrow();
+}
+
+// salva l'auto solo con il GPS vero: aspetto fino a 30 s una precisione di 20 m (la prima stima del
+// telefono può sbagliare di chilometri) e, se resta imprecisa, chiedo prima di salvarla
+async function saveCarHere(btn) {
+  const label = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = 'Cerco il GPS…';
+  try {
+    const f = await preciseFix({ good: 20, timeout: 30000, onUpdate: (b) => { btn.textContent = `GPS ±${b.acc < 1000 ? Math.round(b.acc) + ' m' : fmt1(b.acc / 1000) + ' km'}…`; } });
+    if (f.acc > 50 && !confirm(`Il GPS è ancora impreciso (±${f.acc < 1000 ? Math.round(f.acc) + ' m' : fmt1(f.acc / 1000) + ' km'}). Salvo comunque?\n\nMeglio: stai all'aperto qualche secondo e riprova, oppure sposta la mappa sull'auto e usa "Centro mappa".`)) return;
+    await setCar(f);
+  } catch (e) {
+    toast(`${e.message}: usa “Centro mappa”`, 5000);
+  } finally {
+    if (btn.isConnected) { btn.disabled = false; btn.innerHTML = label; }
+  }
 }
 
 async function openCar() {
@@ -1735,6 +1778,8 @@ async function init() {
   if (lastGps) { state.gps = lastGps; state.start = { lat: lastGps.lat, lon: lastGps.lon, manual: false }; map.setView([lastGps.lat, lastGps.lon], 10); }
   renderStart(); drawMe();
   state.car = (await kv.get('car')) || null;
+  state.blocked = (await kv.get('blocked')) || [];
+  renderBlocked();
   drawCar();
 
   state.analysis = await kv.get('lastAnalysis');
