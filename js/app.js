@@ -295,7 +295,7 @@ function spotPopup(s) {
   const pinBg = s.fungaia ? 'var(--charcoal)' : scoreColor(s.score), pinFg = s.fungaia ? 'var(--gold)' : scoreFg(s.score);
   // dettagli: tutto ciò che spiega il voto, a richiesta
   const details = [
-    `${esc(s.forest)}${s.edge ? ' · margine o radura' : ''}${s.canopy ? ` · chioma ${s.canopy.mean}%${s.canopy.mean < 60 ? ' (rada: possibili rovi)' : ''}` : ''}`,
+    `${esc(s.forest)}${s.edge ? ' · margine o radura' : ''}${s.canopy ? ` · chioma ${s.canopy.mean}%${s.canopy.mean < 60 && s.canopy.thorny !== false ? ' (rada: possibili rovi)' : ''}` : ''}`,
     s.fungaia ? `${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}` : '',
     s.micro ? `<span style="color:var(--ok)">${microText(s.micro)}</span>` : '',
     s.nearEmpty ? `<span style="color:var(--warn)">Uscita a vuoto a ${s.nearEmpty.m} m il ${itDate(s.nearEmpty.date)}: voto ridotto</span>` : '',

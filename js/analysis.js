@@ -434,7 +434,15 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
 
   // chioma rada: luce a terra, sottobosco di rovi e arbusti, porcini più rari. Margini e radure valgono
   // il bonus solo se attorno la chioma resta fitta.
-  const canopyF = (cp) => (!cp ? 1 : cp.mean >= 75 ? 1 : cp.mean <= 45 ? 0.82 : 0.82 + (0.18 * (cp.mean - 45)) / 30);
+  // Solo dove i rovi crescono davvero: rovo comune e prugnolo sono quasi tutti sotto i 900 m (segnalazioni
+  // italiane GBIF), rari oltre 1100 m; più su restano rovo delle faggete e lampone, bassi e attraversabili.
+  const thornW = (elev) => (elev <= 900 ? 1 : elev >= 1300 ? 0 : (1300 - elev) / 400);
+  const canopyF = (cp, elev) => {
+    if (!cp || cp.mean >= 75) return 1;
+    const f = cp.mean <= 45 ? 0.82 : 0.82 + (0.18 * (cp.mean - 45)) / 30;
+    return 1 - (1 - f) * thornW(elev);
+  };
+  const thornyOpen = (cp, elev) => cp && cp.mean < 75 && thornW(elev) > 0;
   const ranked = picked
     .filter((c) => !c.patch || c.patch.frac >= 0.25)
     .filter((c) => !isBlocked(c))
@@ -449,13 +457,13 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const tm = evalTiming(w, date, s, fk, c.elevation, learn);
       // suolo secco conta come "piogge scarse" anche se nei 20 giorni è caduta la quantità minima
       const regime = regimeOf(tm.soil.cls === 'secco' ? 0 : tm.rainTotal, tc);
-      const edge = c.patch && c.patch.frac > 0.3 && c.patch.frac < 0.85 && (!c.canopy || c.canopy.mean >= 75) ? 1.08 : 1;
+      const edge = c.patch && c.patch.frac > 0.3 && c.patch.frac < 0.85 && !thornyOpen(c.canopy, c.elevation) ? 1.08 : 1;
       const wet = c.wet || wetMain.at(c.lat, c.lon);
       const sh = shelterOf(wet.m, c.aspect, c.slope);
       let best = null;
       for (const g of groups) {
         const pl = evalPlace({ elevation: c.elevation, slope: c.slope, aspect: c.aspect, forestKey: fk, regime, wind: tm.wind }, ctx, g.key);
-        let bonus = edge * canopyF(c.canopy);
+        let bonus = edge * canopyF(c.canopy, c.elevation);
         bonus *= nearFindBonus(c);
         bonus *= emptyFactor(c, tm);
         const fin = combine(pl.score, tm, g.weight, bonus, hot, sh, c.slope);
@@ -491,7 +499,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         forestType: c.patch ? `${c.patch.type}, copertura ${Math.round(c.patch.frac * 100)}%` : null,
         heat: c.heat || null, heatCell: c.heatCell || 30,
         edge: edge > 1,
-        canopy: c.canopy ? { mean: Math.round(c.canopy.mean), open: Math.round(c.canopy.open * 100) } : null,
+        canopy: c.canopy ? { mean: Math.round(c.canopy.mean), open: Math.round(c.canopy.open * 100), thorny: thornW(c.elevation) > 0 } : null,
         rainTotal: Math.round(tm.rainTotal),
         daysSince: tm.daysSince,
         killers: tm.killers,
