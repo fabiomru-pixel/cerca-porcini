@@ -162,7 +162,18 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const img = new Uint8ClampedArray(OW * OH * 4);
   const cands = [];
   const ctx = { meanT: summary.meanT, meanMax: summary.meanMax, valleyElev, gradient: s.gradient, southOffsetM: s.southOffsetM, learn };
-  const nearFinds = finds.filter((f) => f.lat && distKm(center, f) < radius + 5);
+  const allNearFinds = finds.filter((f) => f.lat && distKm(center, f) < radius + 5);
+  // Una fungaia vale come fungaia solo nella stagione delle specie trovate lì (regola dell'utente, ottobre 2026:
+  // la fungaia di porcini estivi di Tobbiana dava 100 a fine ottobre). Fuori stagione è un posto come gli altri,
+  // senza bonus ma anche senza penalità. Ritrovamenti senza specie indicata: nessun limite.
+  const month = Number(date.slice(5, 7));
+  const seasonOf = (f) => {
+    const sp = (f.visits || []).filter((v) => v.count > 0 && v.kind !== 'altro').map((v) => v.species);
+    if (!sp.length || sp.some((k) => !k || !SPECIES[k])) return { inSeason: true, species: [] };
+    const uniq = [...new Set(sp)];
+    return { inSeason: uniq.some((k) => SPECIES[k].months.includes(month)), species: uniq };
+  };
+  const nearFinds = allNearFinds.filter((f) => seasonOf(f).inSeason);
   // bonus "vicino a una tua fungaia": conta la fungaia più vicina (fino a +25% sul posto, svanisce entro 2 km).
   // Prima i bonus di più fungaie si moltiplicavano: due luoghi salvati nello stesso punto davano +56%.
   const nearFindBonus = (p) => {
@@ -174,7 +185,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   // stesso timer). La carta dei boschi a 900–1000 m confonde spesso faggi e castagni.
   const userForest = (p) => {
     let fk = null, bd = 0.3;
-    for (const f of nearFinds) { if (!f.forestKey) continue; const d = distKm(p, f); if (d < bd) { bd = d; fk = f.forestKey; } }
+    for (const f of allNearFinds) { if (!f.forestKey) continue; const d = distKm(p, f); if (d < bd) { bd = d; fk = f.forestKey; } }
     return fk;
   };
   // uscite a vuoto recenti: la zona è stata battuta senza trovare niente. Penalità entro 1,5 km che
@@ -576,8 +587,10 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         if (!best || fin > best.fin) best = { fin, pl, g };
       }
       const sm = placeSummary(place);
+      const ss = seasonOf(place);
       fungaie.push({
         fungaia: true, placeId: place.id,
+        offSeason: ss.inSeason ? null : ss.species.map((k) => SPECIES[k].common),
         lat: place.lat, lon: place.lon,
         elevation: Math.round(elevation), slope: Math.round(slope), aspect: Math.round(aspect),
         aspectLabel: aspectLabel(aspect, slope),

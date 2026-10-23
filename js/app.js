@@ -296,6 +296,7 @@ function spotPopup(s) {
   // dettagli: tutto ciò che spiega il voto, a richiesta
   const details = [
     `${esc(s.forest)}${s.edge ? ' · margine o radura' : ''}${s.canopy ? ` · chioma ${s.canopy.mean}%${s.canopy.mean < 60 && s.canopy.thorny !== false ? ' (rada: possibili rovi)' : ''}` : ''}`,
+    s.offSeason ? `<span style="color:var(--warn)">Fuori stagione per le specie trovate qui (${esc(s.offSeason.join(', '))}): valutata come uno spot qualsiasi</span>` : '',
     s.fungaia ? `${s.nPos} ritrovament${s.nPos === 1 ? 'o' : 'i'} · ${s.total} esemplari${s.lastVisit ? ` · ultimo ${new Date(s.lastVisit).toLocaleDateString('it-IT')}` : ''}` : '',
     s.micro ? `<span style="color:var(--ok)">${microText(s.micro)}</span>` : '',
     s.nearEmpty ? `<span style="color:var(--warn)">Uscita a vuoto a ${s.nearEmpty.m} m il ${itDate(s.nearEmpty.date)}: voto ridotto</span>` : '',
@@ -694,7 +695,7 @@ function renderSpots() {
     <div class="card click spot${s.fungaia ? ' fung' : ''}" data-id="${s.id}">
       <div class="score" style="background:${scoreColor(s.score)};color:${scoreFg(s.score)}">${s.score}</div>
       <div>
-        <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.zone ? `<span class="pill zone">Zona ${s.zone}</span> ` : ''}${s.fungaia ? `<span class="pill ok">tua fungaia</span>` : ''}</div>
+        <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.zone ? `<span class="pill zone">Zona ${s.zone}</span> ` : ''}${s.fungaia ? `<span class="pill ${s.offSeason ? '' : 'ok'}">tua fungaia${s.offSeason ? ' · fuori stagione' : ''}</span>` : ''}</div>
         <div class="m">${esc(s.forest)} · ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km${s.access ? ` · strada ${s.access.walkMin} min` : ''}</div>
         ${s.protected ? `<div class="m" style="color:var(--danger)">${s.protected.strict ? 'Riserva integrale' : 'Area protetta'}: ${esc(s.protected.name)}</div>` : ''}
         ${s.killers.length ? `<div class="m" style="color:var(--warn)">Timer fermo: ${s.killers.join(', ')}</div>` : ''}
