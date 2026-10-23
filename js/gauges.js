@@ -49,10 +49,13 @@ export async function loadGauges(area) {
   let stations = base.stations;
   if (area) {
     stations = stations.filter((st) => distKm(area, st) <= area.km + MAX_KM);
-    // lettura diretta solo se il file non ha ancora i dati di ieri: dal telefono il SIR via Cloudflare è lento
-    // (fino a 15 s di attesa) e il file viene aggiornato due volte al giorno
+    // lettura diretta solo se il file non ha ancora i dati di ieri per queste stazioni: dal telefono il SIR via
+    // Cloudflare è lento (fino a 15 s di attesa) e il file viene aggiornato due volte al giorno.
+    // Conta il dato delle stazioni, non solo la data: un file aggiornato a metà ha i giorni ma valori vuoti.
     const yesterday = new Date(Date.now() - 864e5).toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
-    if (!(base.days?.[base.days.length - 1] >= yesterday)) await fetchLive(stations.map((st) => st.id));
+    const yi = base.days?.indexOf(yesterday) ?? -1;
+    const withData = yi < 0 ? 0 : stations.filter((st) => st.r[yi] != null).length;
+    if (withData < Math.max(1, stations.length * 0.6)) await fetchLive(stations.map((st) => st.id));
   }
   // il giorno in corso è parziale: per oggi resta la stima dei modelli
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });

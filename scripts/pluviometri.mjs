@@ -111,6 +111,9 @@ else {
   }
 }
 log(`Scaricate ${out.length} stazioni su ${stations.length}`);
+// con pochi dati nuovi non riscrivo il file: completare con i valori vecchi faceva sembrare il file aggiornato
+// a ieri mentre le stazioni avevano solo giorni vuoti (ottobre 2026: 3 stazioni su 376 per due settimane)
+if (out.length < 250) { log(`Troppe poche stazioni nuove (${out.length}): non sovrascrivo il file, l'app legge in diretta.`); process.exit(1); }
 
 // Se il SIR ha risposto solo in parte (succede dai server di GitHub), tengo i dati precedenti delle
 // stazioni mancanti per i giorni in comune: meglio un dato di ieri che nessun dato.
