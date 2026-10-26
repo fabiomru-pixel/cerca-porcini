@@ -125,6 +125,35 @@ export async function createPlace(placeData, visitData, files = []) {
   return place;
 }
 
+// Uscite a vuoto doppie: lo stesso giorno, entro 50 m, registrate due volte (fine giro + a mano, ottobre 2026).
+// Un luogo fatto solo di uscite a vuoto già presenti in un altro luogo vicino viene eliminato. Ritorna quanti.
+export async function mergeDuplicateEmpties() {
+  const all = (await fdb.all()).filter((p) => p && !p.deleted).map(normalizeFind);
+  const isEmpty = (v) => !(v.count > 0) && v.kind !== 'altro' && v.datetime;
+  const near = (a, b) => Math.hypot((a.lat - b.lat) * 111.2, (a.lon - b.lon) * 111.2 * Math.cos((a.lat * Math.PI) / 180)) < 0.05;
+  let n = 0;
+  for (const p of all) {
+    if (p.deleted || !p.visits.length || !p.visits.every(isEmpty)) continue;
+    const dup = p.visits.every((v) => all.some((q) => q !== p && !q.deleted && near(p, q)
+      && q.visits.some((w) => isEmpty(w) && w.datetime.slice(0, 10) === v.datetime.slice(0, 10))));
+    if (!dup) continue;
+    p.deleted = true; p.updatedAt = new Date().toISOString();
+    await fdb.put(p); n++;
+  }
+  return n;
+}
+
+// Luogo già salvato entro 50 m (per aggiungere lì un'uscita invece di creare un doppione)
+export async function placeNear(lat, lon, km = 0.05) {
+  let best = null, bd = km;
+  for (const raw of await fdb.all()) {
+    if (!raw || raw.deleted || raw.lat == null) continue;
+    const d = Math.hypot((raw.lat - lat) * 111.2, (raw.lon - lon) * 111.2 * Math.cos((lat * Math.PI) / 180));
+    if (d < bd) { bd = d; best = normalizeFind(raw); }
+  }
+  return best;
+}
+
 export async function addVisit(placeId, visitData, files = []) {
   const place = normalizeFind(await fdb.get(placeId));
   const v = newVisit(visitData);

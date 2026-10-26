@@ -9,7 +9,7 @@ import { runAnalysis } from './analysis.js';
 import { buildGpx, shareOrDownload, download } from './gpx.js';
 import {
   createPlace, addVisit, updateVisit, updatePlace, deleteFind, listFinds, processPending, computeLearn,
-  normalizeFind, placeSummary, visitOffset, predictPlace, migrateFinds, AGES, STATES,
+  normalizeFind, placeSummary, visitOffset, predictPlace, migrateFinds, mergeDuplicateEmpties, placeNear, AGES, STATES,
 } from './finds.js';
 import { syncDrive, hasToken, uploadBackup, listBackups, downloadBackup } from './drive.js';
 import { lon2px, lat2px, distKm, bearing, fmtDist, parseCoords, ASPECT_NAME } from './geo.js';
@@ -1072,6 +1072,9 @@ async function completePending() {
   if (pendingBusy || !navigator.onLine) return;
   pendingBusy = true;
   try {
+    // uscite a vuoto registrate due volte e giri con soli altri funghi segnati "trovato" (versioni precedenti)
+    if (await mergeDuplicateEmpties()) { await refreshFinds(); markDirty(); }
+    await fixOutingOutcomes();
     const n = await processPending(state.settings);
     if (n) {
       await refreshFinds(); toast(`Dati completati per ${n} fungai${n === 1 ? 'a' : 'e'}`);
@@ -1506,12 +1509,11 @@ async function finishNav(sum) {
   nav = null;
   navLayers?.clearLayers();
   await refreshFinds();
-  // fungaie salvate durante il giro (ritrovamenti con funghi)
-  const found = state.finds.reduce((n, f) => n + (f.visits || []).filter((x) => x.count > 0 && (x.createdAt || x.datetime || '') >= sum.startedAt).length, 0);
+  const { found, other } = outingFinds(sum);
   const minutes = Math.max(1, Math.round((new Date(sum.endedAt) - new Date(sum.startedAt)) / 60000));
   const out = {
-    id: sum.startedAt, ...meta, ...sum, minutes, found,
-    outcome: found ? 'trovato' : null,
+    id: sum.startedAt, ...meta, ...sum, minutes, found, other,
+    outcome: found ? 'trovato' : other ? 'altri' : null,
   };
   const list = (await kv.get('outings')) || [];
   list.unshift(out);
@@ -1519,6 +1521,32 @@ async function finishNav(sum) {
   markDirty();
   renderOutings();
   showOutingDialog(out);
+}
+
+// ritrovamenti salvati durante un giro: porcini e, a parte, altri funghi
+function outingFinds(o) {
+  const end = o.endedAt || new Date().toISOString();
+  let found = 0, other = 0;
+  for (const f of state.finds) for (const x of f.visits || []) {
+    const t = x.createdAt || x.datetime || '';
+    if (!(x.count > 0) || t < o.startedAt || t > end) continue;
+    if (x.kind === 'altro') other++; else found++;
+  }
+  return { found, other };
+}
+
+// giri salvati prima della 1.29.1: "trovato" anche con soli altri funghi
+async function fixOutingOutcomes() {
+  const list = (await kv.get('outings')) || [];
+  let ch = false;
+  for (const o of list) {
+    if (o.outcome !== 'trovato' || o.other != null) continue;
+    const r = outingFinds(o);
+    o.found = r.found; o.other = r.other;
+    if (!r.found && r.other) o.outcome = 'altri';
+    ch = true;
+  }
+  if (ch) { await kv.set('outings', list); markDirty(); }
 }
 
 function outingSummaryHtml(o) {
@@ -1531,10 +1559,11 @@ function outingSummaryHtml(o) {
 
 function showOutingDialog(o) {
   const f = $('#outForm');
-  const ask = !o.found;
+  const ask = !o.found && !o.other;
   f.innerHTML = `<h2>${esc(o.title || 'Giro')} ${o.reason === 'completato' ? 'completato' : 'terminato'}</h2>
     ${outingSummaryHtml(o)}
-    ${ask ? `<p>Durante il giro non hai salvato nessuna fungaia. <b>È stato un giro a vuoto?</b></p>
+    ${!o.found && o.other ? `<p>Nessun porcino: hai salvato solo altri funghi (${o.other}).</p><button class="btn primary block" value="">Chiudi</button>`
+    : ask ? `<p>Durante il giro non hai salvato nessuna fungaia. <b>È stato un giro a vuoto?</b></p>
       <div class="btn-row"><button class="btn primary" value="vuoto">Sì, a vuoto</button><button class="btn" value="trovato">No, ho trovato</button></div>
       <button class="btn block" style="margin-top:8px" value="">Decido dopo</button>`
     : `<p>Fungaie salvate durante il giro: <b>${o.found}</b>.</p><button class="btn primary block" value="">Chiudi</button>`}`;
@@ -1560,7 +1589,12 @@ async function markOutingEmpty(o) {
   const pts = o.targets.filter((t) => o.visited.includes(t.id));
   const use = pts.length ? pts : o.track.length ? [{ lat: o.track[o.track.length - 1][0], lon: o.track[o.track.length - 1][1] }] : o.targets;
   const lat = use.reduce((a, p) => a + p.lat, 0) / use.length, lon = use.reduce((a, p) => a + p.lon, 0) / use.length;
-  await createPlace({ lat, lon, forestChoice: '' }, { datetime: new Date().toISOString(), count: 0, notes: `${o.title || 'Giro'} a vuoto${pts.length ? ': ' + pts.map((p) => p.id).join(', ') : ''}` });
+  const visit = { datetime: new Date().toISOString(), count: 0, notes: `${o.title || 'Giro'} a vuoto${pts.length ? ': ' + pts.map((p) => p.id).join(', ') : ''}` };
+  const here = await placeNear(lat, lon);
+  const today = visit.datetime.slice(0, 10);
+  if (here && here.visits.some((v) => !(v.count > 0) && v.kind !== 'altro' && (v.datetime || '').slice(0, 10) === today)) { /* già registrata oggi */ }
+  else if (here) await addVisit(here.id, visit);
+  else await createPlace({ lat, lon, forestChoice: '' }, visit);
   await setOutingOutcome(o.id, 'vuoto');
   await refreshFinds();
   toast('Uscita a vuoto registrata: gli spot vicini saranno penalizzati per qualche settimana');
@@ -1575,7 +1609,7 @@ async function renderOutings() {
     el.innerHTML = `<div class="empty">${icon('walk')}<div>Qui trovi i riepiloghi dei giri fatti con la guida a piedi.<br>Avviane uno da una zona o da uno spot ("A piedi qui").</div></div>`;
     return;
   }
-  const pill = (o) => (o.outcome === 'trovato' ? `<span class="pill ok">trovati${o.found ? ' ' + o.found : ''}</span>` : o.outcome === 'vuoto' ? '<span class="pill warn">a vuoto</span>' : '<span class="pill">esito da indicare</span>');
+  const pill = (o) => (o.outcome === 'trovato' ? `<span class="pill ok">porcini${o.found ? ' ' + o.found : ''}</span>` : o.outcome === 'altri' ? '<span class="pill">solo altri funghi</span>' : o.outcome === 'vuoto' ? '<span class="pill warn">a vuoto</span>' : '<span class="pill">esito da indicare</span>');
   el.innerHTML = list.map((o, i) => `<div class="card click out-card" data-i="${i}">
       <div class="row"><div class="t grow">${esc(o.title || 'Giro')}</div>${pill(o)}</div>
       <div class="m">${new Date(o.startedAt).toLocaleString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${navDist(o.distanceM)} · ${navDur(o.minutes)} · ${o.visited.length}/${o.targets.length} ${o.targets.length > 1 ? 'tappe' : 'spot'}</div>
