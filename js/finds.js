@@ -2,7 +2,7 @@
 // completamento dei dati quando torna la rete e apprendimento dai risultati.
 import { finds as fdb, photos as pdb, uid } from './db.js';
 import { terrainAtPoint } from './dem.js';
-import { temperatureAt, fetchDaily, fetchDailyArchive } from './weather.js';
+import { temperatureAt, fetchDaily, fetchDailyArchive, subsoilTemp } from './weather.js';
 import { aspectLabel } from './geo.js';
 import { SPECIES, GROUPS } from './config.js';
 import { rainEpisodes, timerRain, timerState, RAIN_FULL_MM, airMoisture, windLoad, forestByElevation, forestTempOffset, soilMoisture, forestTimer, addDays } from './engine.js';
@@ -250,7 +250,7 @@ async function dailyAround(lat, lon, date, before = 45) {
 // 4 = pioggia madre con la regola del timer: la più vecchia da 15 mm (somma dei giorni consecutivi) nei 20 giorni
 // 5 = + umidità dell'aria e vento medi dei 7 giorni prima (microclima)
 // 6 = seconda pioggia: rinforzo / nuovo timer / saturazione (timerState)
-export const SNAPSHOT_VER = 6;
+export const SNAPSHOT_VER = 7; // 7: temperatura del terreno a 18 e 54 cm
 const MIN_FRUIT_DAYS = 5;
 
 async function snapshotFor(place, v, s) {
@@ -286,6 +286,7 @@ async function snapshotFor(place, v, s) {
 
   return {
     ver: SNAPSHOT_VER,
+    subsoil: await subsoilTemp(place.lat, place.lon, date, place.elevation).catch(() => null),
     rainSrc: w.rainSrc?.type === 'pluviometri' ? { type: 'pluviometri', stations: w.rainSrc.stations } : { type: 'modelli' },
     meanT: Math.round(meanT * 10) / 10,
     meanMax: Math.round(meanMax * 10) / 10,

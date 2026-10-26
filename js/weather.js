@@ -116,6 +116,32 @@ export async function fetchDaily(points, { pastDays = 30, forecastDays = 16, onW
   return out;
 }
 
+// Temperatura del terreno in profondità (18 e 54 cm, modello ICON), media dei 7 giorni prima di `date`,
+// riportata alla quota del posto (0,55 °C ogni 100 m). Solo registrata nei ritrovamenti per tarare in futuro una
+// soglia sul substrato (richiesta dell'utente, ottobre 2026): non entra nei voti. Sempre ICON, per valori confrontabili.
+const HIST_FORECAST = 'https://historical-forecast-api.open-meteo.com/v1/forecast';
+export async function subsoilTemp(lat, lon, date, elevation) {
+  const end = new Date(date + 'T12:00:00');
+  const start = new Date(end.getTime() - 7 * 864e5);
+  const iso = (d) => d.toLocaleDateString('sv-SE');
+  const recent = Date.now() - end.getTime() < 3 * 864e5; // l'archivio dei modelli arriva con 1–2 giorni di ritardo
+  const p = new URLSearchParams({ latitude: lat, longitude: lon, hourly: 'soil_temperature_18cm,soil_temperature_54cm', models: 'icon_seamless', timezone: 'Europe/Rome' });
+  if (recent) { p.set('past_days', '10'); p.set('forecast_days', '1'); } else { p.set('start_date', iso(start)); p.set('end_date', iso(end)); }
+  const url = `${recent ? FORECAST : HIST_FORECAST}?${p}`;
+  let j = null;
+  for (let i = 0; i < 2 && !j; i++) {
+    try { const r = await fetch(url, { signal: AbortSignal.timeout(30000) }); if (r.ok) j = await r.json(); } catch { /* riprovo */ }
+  }
+  if (!j?.hourly) return null;
+  const h = j.hourly, idx = [];
+  h.time.forEach((t, i) => { const d = new Date(t); if (d > start && d <= end) idx.push(i); });
+  const mean = (k) => { const v = idx.map((i) => h[k]?.[i]).filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const corr = elevation != null && j.elevation != null ? ((elevation - j.elevation) * 0.55) / 100 : 0;
+  const r1 = (x) => (x == null ? null : Math.round((x - corr) * 10) / 10);
+  const t18 = r1(mean('soil_temperature_18cm')), t54 = r1(mean('soil_temperature_54cm'));
+  return t18 == null && t54 == null ? null : { t18, t54, src: 'ICON' };
+}
+
 // Dati giornalieri storici (archivio Open-Meteo, dal 1940) per un punto e un intervallo di date
 export async function fetchDailyArchive(lat, lon, startDate, endDate) {
   const p = new URLSearchParams({
