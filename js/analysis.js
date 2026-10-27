@@ -12,7 +12,7 @@ import { nearestRoad, walkMinutes } from './access.js';
 import { wetness } from './hydro.js';
 import {
   activeGroups, summarize, targetBand, evalPlace, evalTiming, bestDates, daysBetween, cellForestKey, finalScore, WIND_NAMES, staleFactor,
-  WEAK_RAIN_FACTOR, microSoil, shelterOf, saturationFactor,
+  WEAK_RAIN_FACTOR, microSoil, shelterOf, saturationFactor, rainEpisodes,
 } from './engine.js';
 
 const todayStr = () => new Date().toLocaleDateString('sv-SE');
@@ -70,7 +70,47 @@ const combine = (place, tm, season, bonus, hot, sh, slope) => finalScore(Math.mi
   * staleFactor(tm.lastRainDays, hot, tm.staleDays) * (tm.weakRain ? WEAK_RAIN_FACTOR : 1)
   * (tm.sat ? saturationFactor(tm.sat, tm.sat.idx, slope) : 1);
 
-export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], empties = [], blocked = [], onStep = () => {} }) {
+// Indicatore della giornata (richiesta dell'utente, ottobre 2026): il voto degli spot dice qual è il posto
+// migliore, questo dice se in questi giorni il bosco della zona sta producendo porcini. Fonte: le tue uscite
+// degli ultimi 14 giorni entro 30 km (porcini sì/no; contano anche quelle con soli altri funghi). Ogni giornata
+// senza porcini pesa di più se recente; se dopo è caduta una pioggia da almeno 15 mm e sono passati 7 giorni
+// conta poco (può essere partita una nuova nascita). Porcini trovati negli ultimi 7 giorni: giornata buona.
+// Il fattore moltiplica tutti i voti (spot e fungaie): l'ordine resta lo stesso.
+export const DAY_KM = 30, DAY_WIN = 14;
+export function dayIndexOf(outings, center, date, days, s) {
+  const byDate = new Map();
+  for (const o of outings) {
+    if (o.lat == null || !o.date || distKm(center, o) > DAY_KM) continue;
+    const age = daysBetween(o.date, date);
+    if (age < 0 || age > DAY_WIN) continue;
+    const d = byDate.get(o.date) || { date: o.date, age, porcini: false, km: Infinity };
+    d.porcini = d.porcini || !!o.porcini;
+    d.km = Math.min(d.km, distKm(center, o));
+    byDate.set(o.date, d);
+  }
+  const list = [...byDate.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
+  const lastPorcini = list.find((d) => d.porcini && d.age <= 7) || null;
+  if (lastPorcini) return { factor: 1, level: 'buona', lastPorcini: { date: lastPorcini.date, km: Math.round(lastPorcini.km) }, empty: [], n: list.length };
+  if (!list.length) return { factor: 1, level: 'senza conferme', empty: [], n: 0 };
+  // piogge dopo ogni uscita (episodi da almeno 15 mm, giorno in cui si arriva a 15)
+  const idx = days.findIndex((d) => d.date === date);
+  const eps = idx > 0 ? rainEpisodes(days, Math.max(0, idx - DAY_WIN - 1), idx, 15) : [];
+  let sumW = 0;
+  const empty = [];
+  for (const d of list) {
+    if (d.porcini) continue; // porcini oltre i 7 giorni: non pesano né in un senso né nell'altro
+    let w = 1 - d.age / DAY_WIN;
+    const after = eps.find((e) => days[e.endIdx].date > d.date);
+    const rainReset = after && daysBetween(days[after.endIdx].date, date) >= 7;
+    if (rainReset) w *= 0.3;
+    sumW += w;
+    empty.push({ date: d.date, km: Math.round(d.km), rainReset: !!rainReset });
+  }
+  const factor = Math.max(0.3, Math.exp(-0.35 * sumW));
+  return { factor: Math.round(factor * 100) / 100, level: factor >= 0.85 ? 'discreta' : factor >= 0.55 ? 'media' : 'bassa', empty, n: list.length };
+}
+
+export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], empties = [], blocked = [], outings = [], onStep = () => {} }) {
   // spot che hai segnato come inaccessibili (rovi, recinti, dirupi): l'area attorno resta fuori
   const isBlocked = (p) => blocked.some((b) => distKm(b, p) < BLOCK_KM);
   const radius = s.radiusKm;
@@ -95,6 +135,8 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   let [ref] = await fetchDaily([center], { pastDays, forecastDays: fDays, onWait });
   ref = applyGauges(ref, G);
   const summary = summarize(ref.days, date, s);
+  const dayIndex = dayIndexOf(outings, center, date, ref.days, s);
+  const dayF = dayIndex.factor;
 
   onStep('Scarico l’altimetria…', 0.1);
   const mosaic = await loadMosaic(lat, lon, radius, { maxTiles: 64, onProgress: (p) => onStep('Scarico l’altimetria…', 0.1 + p * 0.25) });
@@ -488,7 +530,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         aspectLabel: aspectLabel(c.aspect, c.slope),
         group: best.g.key,
         species: best.g.species.map((k) => SPECIES[k].common),
-        score: Math.round(best.fin * 100),
+        score: Math.round(best.fin * dayF * 100), scoreRaw: Math.round(best.fin * 100),
         soil: { theta: Math.round(tm.soil.theta * 100), cls: tm.soil.cls, label: tm.soil.label },
         // fattori 0–100 che compongono il voto
         parts: {
@@ -595,7 +637,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         elevation: Math.round(elevation), slope: Math.round(slope), aspect: Math.round(aspect),
         aspectLabel: aspectLabel(aspect, slope),
         group: best.g.key, species: best.g.species.map((k) => SPECIES[k].common),
-        score: Math.round(best.fin * 100),
+        score: Math.round(best.fin * dayF * 100), scoreRaw: Math.round(best.fin * 100),
         soil: { theta: Math.round(tm.soil.theta * 100), cls: tm.soil.cls, label: tm.soil.label },
         parts: {
           luogo: Math.round(Math.min(1, best.pl.score * fBonus) * 100), suolo: Math.round(fSoil * 100),
@@ -695,7 +737,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     createdAt: new Date().toISOString(),
     date, center, radius, valleyElev,
     settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto', forestPref: s.forestPref || 'auto' },
-    summary, groups, timers, spots: final, fungaie, zones, overlay, contours,
+    summary, dayIndex, groups, timers, spots: final, fungaie, zones, overlay, contours,
     scan: { areas: areas.length, fine: true, excludedFar, maxWalk },
     protectedFc, forestChecked: !!forest, demZoom: mosaic.z,
     clim, tc,

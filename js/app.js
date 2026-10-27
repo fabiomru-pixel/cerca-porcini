@@ -495,6 +495,9 @@ async function run() {
       empties: state.finds.flatMap((f) => (f.visits || []).filter((v) => !(v.count > 0) && v.kind !== 'altro' && v.datetime)
         .map((v) => ({ lat: f.lat, lon: f.lon, date: v.datetime.slice(0, 10) }))),
       blocked: state.blocked || [],
+      // tutte le uscite (porcini sì/no, anche con soli altri funghi) per l'indicatore della giornata
+      outings: state.finds.flatMap((f) => (f.visits || []).filter((v) => v.datetime)
+        .map((v) => ({ lat: f.lat, lon: f.lon, date: v.datetime.slice(0, 10), porcini: v.count > 0 && v.kind !== 'altro' }))),
       onStep: (t, p) => progress(t, p),
     });
     state.analysis = a;
@@ -645,8 +648,17 @@ function renderResults() {
   if (killersAll.length) alerts.push(`<div class="alert warn">“Killer” del bosco rilevati dopo l’ultima pioggia in alcune zone: <b>${killersAll.join(', ')}</b>. Lì il timer si ferma.</div>`);
   if (!a.forestChecked) alerts.push('<div class="alert warn">Carta dei boschi Copernicus non raggiungibile: alcuni spot potrebbero cadere fuori dal bosco.</div>');
   const learnN = state.learn?.n || 0;
+  const di = a.dayIndex;
+  let dayHtml = '';
+  if (di?.level === 'buona') dayHtml = `<div class="alert ok"><b>Giornata buona</b> · porcini trovati il ${itDate(di.lastPorcini.date)} a ${di.lastPorcini.km} km da qui: il bosco sta producendo.</div>`;
+  else if (di?.level === 'senza conferme') dayHtml = '<div class="alert small">Giornata <b>senza conferme</b>: nessuna tua uscita negli ultimi 14 giorni entro 30 km. I voti si basano solo su meteo e terreno.</div>';
+  else if (di) {
+    const n = di.empty.length;
+    dayHtml = `<div class="alert ${di.level === 'bassa' ? 'bad' : 'warn'}"><b>Giornata ${di.level}</b> · ${n} uscit${n === 1 ? 'a' : 'e'} senza porcini negli ultimi 14 giorni entro 30 km (${di.empty.map((e) => itDate(e.date)).join(', ')}): il bosco della zona non sta producendo porcini. Voti ridotti del ${Math.round((1 - di.factor) * 100)}%. Risalgono quando trovi porcini o dopo una nuova pioggia.</div>`;
+  }
   el.innerHTML = `
     <h3>Condizioni ${a.date === todayStr() ? 'di oggi' : 'per ' + itDate(a.date)}</h3>
+    ${dayHtml}
     <div class="kpis">
       <div class="kpi"><b>${fmt1(s.meanT)}°</b><span>T media valle (${a.settings.windowDays} gg)</span></div>
       <div class="kpi"><b>${fmt1(s.meanMax)}° / ${fmt1(s.meanMin)}°</b><span>media max / min</span></div>
