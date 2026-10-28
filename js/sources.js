@@ -2,6 +2,26 @@
 import { FOREST_TYPE_URL, EEA_PROTECTED_URL, BUILT_UP_URL, TREE_COVER_URL } from './config.js';
 import { pointInPolygon, lon2px, lat2px } from './geo.js';
 
+// Servizi Copernicus/EEA (image.discomap.eea.europa.eu): a volte in manutenzione per giorni (502) o lentissimi
+// (fino a 60 s per richiesta, ottobre 2026: un'analisi durava diversi minuti). Quindi:
+//  - al massimo 10 s per richiesta;
+//  - dopo un errore il servizio è considerato fermo per 10 minuti e non lo interrogo più (fallisce subito);
+//  - le risposte buone restano in cache sul telefono: sono carte fisse (2018), valgono per sempre.
+const EEA_TIMEOUT = 10000, EEA_PAUSE = 10 * 60000, EEA_CACHE = 'cp-eea-v1';
+let eeaDownUntil = 0;
+export const eeaDown = () => Date.now() < eeaDownUntil;
+async function eeaFetch(url) {
+  let cache = null;
+  try { cache = await caches.open(EEA_CACHE); const hit = await cache.match(url); if (hit) return hit; } catch { cache = null; }
+  if (eeaDown()) throw new Error('Servizio Copernicus non raggiungibile (in pausa)');
+  let res;
+  try { res = await fetch(url, { signal: AbortSignal.timeout(EEA_TIMEOUT) }); }
+  catch (e) { eeaDownUntil = Date.now() + EEA_PAUSE; throw new Error('Servizio Copernicus non raggiungibile'); }
+  if (!res.ok) { if (res.status >= 500) eeaDownUntil = Date.now() + EEA_PAUSE; return res; }
+  try { await cache?.put(url, res.clone()); } catch { /* cache piena: pazienza */ }
+  return res;
+}
+
 const HALF = 20037508.342789244;
 const pxToM = (px, z) => (px * (2 * HALF)) / (256 * 2 ** z) - HALF;
 const pyToM = (py, z) => HALF - (py * (2 * HALF)) / (256 * 2 ** z);
@@ -12,7 +32,7 @@ async function exportForest(x0, y0, x1, y1, w, h) {
     bbox: `${x0},${y0},${x1},${y1}`, bboxSR: '3857', imageSR: '3857',
     size: `${w},${h}`, format: 'png', interpolation: 'RSP_NearestNeighbor', f: 'image',
   });
-  const res = await fetch(`${FOREST_TYPE_URL}?${p}`);
+  const res = await eeaFetch(`${FOREST_TYPE_URL}?${p}`);
   if (!res.ok) throw new Error(`Carta forestale: ${res.status}`);
   const bmp = await createImageBitmap(await res.blob());
   const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
@@ -41,7 +61,7 @@ export async function builtRaster(z, px0, py0, px1, py1, w, h) {
     bbox: `${pxToM(px0, z)},${pyToM(py1, z)},${pxToM(px1, z)},${pyToM(py0, z)}`, bboxSR: '3857', imageSR: '3857',
     size: `${w},${h}`, format: 'png', interpolation: 'RSP_NearestNeighbor', f: 'image',
   });
-  const res = await fetch(`${BUILT_UP_URL}?${p}`);
+  const res = await eeaFetch(`${BUILT_UP_URL}?${p}`);
   if (!res.ok) throw new Error(`Carta degli edifici: ${res.status}`);
   const bmp = await createImageBitmap(await res.blob());
   const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
@@ -98,7 +118,7 @@ export async function canopyPatch(lat, lon, r = 60, n = 13) {
     bbox: `${pxToM(cx - d, z)},${pyToM(cy + d, z)},${pxToM(cx + d, z)},${pyToM(cy - d, z)}`, bboxSR: '3857', imageSR: '3857',
     size: `${n},${n}`, format: 'bmp', interpolation: 'RSP_NearestNeighbor', renderingRule: '{"rasterFunction":"None"}', f: 'image',
   });
-  const res = await fetch(`${TREE_COVER_URL}?${p}`);
+  const res = await eeaFetch(`${TREE_COVER_URL}?${p}`);
   if (!res.ok) throw new Error(`Chioma: ${res.status}`);
   const bmp = await createImageBitmap(await res.blob());
   const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(n, n) : Object.assign(document.createElement('canvas'), { width: n, height: n });
@@ -128,7 +148,7 @@ export async function fetchProtected(bb) {
       outFields: 'siteName,iucnCategory,nationalId', outSR: '4326',
       maxAllowableOffset: '0.0008', resultOffset: String(offset), resultRecordCount: '200', f: 'geojson',
     });
-    const res = await fetch(`${EEA_PROTECTED_URL}?${p}`);
+    const res = await eeaFetch(`${EEA_PROTECTED_URL}?${p}`);
     if (!res.ok) throw new Error(`Aree protette: ${res.status}`);
     const j = await res.json();
     feats.push(...(j.features || []));
