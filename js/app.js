@@ -646,6 +646,7 @@ function renderResults() {
   if (s.meanMax > 30) alerts.push('<div class="alert warn">Caldo estremo in valle (medie delle massime oltre 30 °C): cerca in quota e sui versanti Nord.</div>');
   const killersAll = [...new Set(a.spots.flatMap((sp) => sp.killers))];
   if (killersAll.length) alerts.push(`<div class="alert warn">“Killer” del bosco rilevati dopo l’ultima pioggia in alcune zone: <b>${killersAll.join(', ')}</b>. Lì il timer si ferma.</div>`);
+  if (a.forestChecked && a.mapSrc?.forest === 'esri') alerts.push('<div class="alert ok small">Servizio Copernicus non raggiungibile: bosco e case verificati con la carta di riserva <b>Esri Land Cover 2025</b> (10 m). Non distingue latifoglie e conifere (decide la quota) e non valuta la densità della chioma.</div>');
   if (!a.forestChecked) alerts.push('<div class="alert warn"><b>Servizio Copernicus non raggiungibile</b> (manutenzione o guasto del server europeo): bosco, case e paesi non verificati, alcuni spot potrebbero cadere fuori dal bosco o vicino alle case. Riprova più tardi per un’analisi completa; le zone già calcolate restano salvate sul telefono.</div>');
   const learnN = state.learn?.n || 0;
   const di = a.dayIndex;

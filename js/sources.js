@@ -26,8 +26,50 @@ const HALF = 20037508.342789244;
 const pxToM = (px, z) => (px * (2 * HALF)) / (256 * 2 ** z) - HALF;
 const pyToM = (py, z) => HALF - (py * (2 * HALF)) / (256 * 2 ** z);
 
+// Carta di riserva quando Copernicus/EEA non risponde: Esri / Impact Observatory "Land Cover" 10 m (Sentinel-2,
+// anno 2025), servizio ArcGIS pubblico con CORS. Classi: 1 acqua, 2 alberi, 4 vegetazione allagata, 5 colture,
+// 7 edificato, 8 suolo nudo, 9 neve, 10 nuvole, 11 prati/arbusti. Non distingue latifoglie e conifere (decide la
+// quota, come quando manca il dato) e non ha la densità della chioma.
+export const LANDCOVER_URL = 'https://ic.imagery1.arcgis.com/arcgis/rest/services/Sentinel2_10m_LandCover/ImageServer/exportImage';
+const LANDCOVER_TIME = Date.UTC(2025, 0, 1);
+export let mapSource = { forest: 'copernicus', built: 'copernicus' }; // per l'avviso nell'analisi
+async function landCover(x0, y0, x1, y1, w, h) {
+  const p = new URLSearchParams({
+    bbox: `${x0},${y0},${x1},${y1}`, bboxSR: '3857', imageSR: '3857', size: `${w},${h}`, format: 'bmp',
+    interpolation: 'RSP_NearestNeighbor', renderingRule: '{"rasterFunction":"None"}', time: String(LANDCOVER_TIME), f: 'image',
+  });
+  const url = `${LANDCOVER_URL}?${p}`;
+  let cache = null, res = null;
+  try { cache = await caches.open(EEA_CACHE); res = await cache.match(url); } catch { cache = null; }
+  if (!res) {
+    res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`Carta di riserva: ${res.status}`);
+    try { await cache?.put(url, res.clone()); } catch { /* niente cache */ }
+  }
+  // BMP a tavolozza grigia senza simbologia: il rosso del pixel è la classe
+  const bmp = await createImageBitmap(await res.blob());
+  const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const cls = new Uint8Array(w * h);
+  for (let i = 0; i < cls.length; i++) cls[i] = d[i * 4];
+  return cls;
+}
+
 // Codici: 0 = non bosco, 1 = latifoglie, 2 = conifere
 async function exportForest(x0, y0, x1, y1, w, h) {
+  try {
+    const codes = await exportForestEEA(x0, y0, x1, y1, w, h);
+    mapSource.forest = 'copernicus';
+    return codes;
+  } catch (e) {
+    const cls = await landCover(x0, y0, x1, y1, w, h); // se fallisce anche questa, l'errore arriva all'analisi
+    mapSource.forest = 'esri';
+    return cls.map((v) => (v === 2 ? 1 : 0)); // alberi -> "latifoglie" (il tipo lo decide la quota)
+  }
+}
+async function exportForestEEA(x0, y0, x1, y1, w, h) {
   const p = new URLSearchParams({
     bbox: `${x0},${y0},${x1},${y1}`, bboxSR: '3857', imageSR: '3857',
     size: `${w},${h}`, format: 'png', interpolation: 'RSP_NearestNeighbor', f: 'image',
@@ -57,6 +99,17 @@ export async function forestRaster(z, px0, py0, px1, py1, w, h) {
 
 // Edifici e superfici costruite (Copernicus Built-Up 2018): 1 = costruito, 0 = no. Stessa griglia di forestRaster.
 export async function builtRaster(z, px0, py0, px1, py1, w, h) {
+  try {
+    const r = await builtRasterEEA(z, px0, py0, px1, py1, w, h);
+    mapSource.built = 'copernicus';
+    return r;
+  } catch (e) {
+    const cls = await landCover(pxToM(px0, z), pyToM(py1, z), pxToM(px1, z), pyToM(py0, z), w, h);
+    mapSource.built = 'esri';
+    return { w, h, mask: cls.map((v) => (v === 7 ? 1 : 0)) };
+  }
+}
+async function builtRasterEEA(z, px0, py0, px1, py1, w, h) {
   const p = new URLSearchParams({
     bbox: `${pxToM(px0, z)},${pyToM(py1, z)},${pxToM(px1, z)},${pyToM(py0, z)}`, bboxSR: '3857', imageSR: '3857',
     size: `${w},${h}`, format: 'png', interpolation: 'RSP_NearestNeighbor', f: 'image',

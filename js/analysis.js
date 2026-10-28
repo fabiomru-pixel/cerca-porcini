@@ -2,7 +2,7 @@
 import { GROUPS, FORESTS, SPECIES, BUILT_MIN_M, BLOCK_KM } from './config.js';
 import { loadMosaic, terrainAtPoint } from './dem.js';
 import { fetchDaily } from './weather.js';
-import { forestRaster, forestPatch, fetchProtected, protectedAt, builtRaster, nearBuiltGrid, canopyPatch } from './sources.js';
+import { forestRaster, forestPatch, fetchProtected, protectedAt, builtRaster, nearBuiltGrid, canopyPatch, mapSource } from './sources.js';
 import { distKm, bboxAround, aspectLabel, metersPerPixel, ASPECT_DEG, angDiff } from './geo.js';
 import { contourLines } from './contours.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
@@ -739,7 +739,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto', forestPref: s.forestPref || 'auto' },
     summary, dayIndex, groups, timers, spots: final, fungaie, zones, overlay, contours,
     scan: { areas: areas.length, fine: true, excludedFar, maxWalk },
-    protectedFc, forestChecked: !!forest, demZoom: mosaic.z,
+    protectedFc, forestChecked: !!forest, mapSrc: { ...mapSource }, demZoom: mosaic.z,
     clim, tc,
   };
 }
