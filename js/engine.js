@@ -125,7 +125,7 @@ export function timerState(days, fromIdx, toIdx, s, forestKey) {
       event = { type: 'rinforzo', date, mm, theta: Math.round(theta * 100) };
     }
   }
-  return { timerIdx: cur.timerIdx, total: cur.total, weak: cur.weak, ext, sat, event };
+  return { timerIdx: cur.timerIdx, startIdx: cur.startIdx, endIdx: cur.endIdx, total: cur.total, weak: cur.weak, ext, sat, event };
 }
 // Penalità per terreno saturo: piena nei giorni subito dopo la pioggia, dimezzata sulle pendenze che drenano (>15°)
 export function saturationFactor(sat, idx, slope) {
@@ -299,11 +299,20 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   const staleDays = longTimer ? Math.max(STALE_DAYS, t.end) : STALE_DAYS;
 
   let best = { score: 0.05, daysSince: null, killers: [], weak: false };
+  let timerInfo = null;
   const tr = timerState(days, timerFrom, idx, s, forestKey);
   if (tr) {
     const daysSince = idx - tr.timerIdx;
     // rinforzo: la seconda pioggia allunga la finestra di qualche giorno
     const tx = tr.ext ? { ...t, optEnd: t.optEnd + tr.ext, end: t.end + tr.ext } : t;
+    // per la scheda: da quale pioggia conto e quando cade il periodo migliore
+    const trig = days[tr.timerIdx].date;
+    const optStart = Math.max(tx.start, tx.optStart), optEnd = Math.max(optStart, tx.optEnd);
+    timerInfo = {
+      rainFrom: days[tr.startIdx]?.date || trig, rainTo: days[tr.endIdx]?.date || trig, trigger: trig, mm: Math.round(tr.total),
+      weak: tr.weak, ext: tr.ext || 0, daysSince,
+      first: addDays(trig, tx.start), optFrom: addDays(trig, optStart), optTo: addDays(trig, optEnd), end: addDays(trig, Math.max(optEnd + 1, tx.end)),
+    };
     let sc = timerScore(daysSince, tx);
     const killers = [];
     for (let i = tr.timerIdx + 1; i <= idx; i++) {
@@ -327,7 +336,7 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   const lastRainDate = lastAny ? days[lastAny.endIdx].date : null;
   return {
     timer: best.score, rainTotal, rainOk: rainTotal >= s.rainMinMm,
-    daysSince: best.daysSince, killers: best.killers, soil, wind, lastRainDays, lastRainDate,
+    daysSince: best.daysSince, killers: best.killers, soil, wind, lastRainDays, lastRainDate, timerInfo,
     weakRain: best.weak, // pioggia sotto i 15 mm: voto −20%
     rainEvent: tr?.event || null, // ultima pioggia arrivata sul timer: nuovo / rinforzo / saturazione
     sat: tr?.sat && idx - tr.sat.endIdx <= SECOND_RAIN.satDays ? { ...tr.sat, idx } : null,

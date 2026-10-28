@@ -304,6 +304,8 @@ ol.steps li { margin-bottom: 4px; }
 .pop-more { margin-top: 8px; font-size: 13px; }
 .pop-more summary { cursor: pointer; color: var(--primary-text); font-weight: 700; padding: 4px 0; }
 .pop-more > div { margin: 3px 0; color: var(--muted); }
+.pop-more > .timer-info { margin: 4px 0 8px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2, rgba(127,127,127,.08)); color: var(--text); line-height: 1.4; }
+.pop-more > .timer-info > div { margin-top: 3px; color: var(--muted); }
 .pill.ok { color: var(--ok); }
 
 /* menu dei livelli aperto: la barra di ricerca si toglie di mezzo */

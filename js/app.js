@@ -271,6 +271,23 @@ function rainSrcText(src) {
 
 // Dettaglio del punteggio: cosa lo alza e cosa lo abbassa
 const SOIL_PILL = { umido: 'ok', limite: 'warn', secco: 'bad' };
+// Timer spiegato: da quale pioggia conto, a che giorno siamo e quando cade il periodo migliore
+function timerText(s) {
+  const t = s.timerInfo;
+  if (!t) return `<div class="timer-info"><b>Timer ${s.parts?.timer ?? ''}</b>: nessuna pioggia utile (almeno ${state.settings.rainEventMm || 10} mm in giorni consecutivi) negli ultimi 20 giorni, nessuna nascita attesa.</div>`;
+  const range = (a, b) => (a === b ? itDate(a) : `${itDate(a)} – ${itDate(b)}`);
+  const ref = state.analysis?.date || todayStr();
+  const status = ref < t.first ? `<span style="color:var(--muted)">troppo presto: i primi porcini dal ${itDate(t.first)}</span>`
+    : ref < t.optFrom ? `<span style="color:var(--warn)">in arrivo: possibili già ora, il meglio dal ${itDate(t.optFrom)}</span>`
+    : ref <= t.optTo ? '<span style="color:var(--ok)">siamo nel periodo migliore</span>'
+    : ref < t.end ? `<span style="color:var(--warn)">finestra in chiusura (fino al ${itDate(t.end)})</span>`
+    : '<span style="color:var(--danger)">finestra chiusa: serve una nuova pioggia</span>';
+  return `<div class="timer-info"><b>Timer ${s.parts?.timer ?? ''}</b> · ${status}
+    <div>Pioggia di riferimento: <b>${range(t.rainFrom, t.rainTo)}</b> (${t.mm} mm${t.weak ? ', sotto i 15 mm: voto −20%' : `, conto dal ${itDate(t.trigger)} quando si superano i 15 mm`}) · oggi è il giorno <b>${t.daysSince}</b></div>
+    <div>Periodo migliore: <b>${range(t.optFrom, t.optTo)}</b> · primi porcini possibili dal ${itDate(t.first)} · finestra fino al ${itDate(t.end)}${t.ext ? ` (allungata di ${t.ext} giorni da una pioggia successiva)` : ''}</div>
+  </div>`;
+}
+
 function scoreBreakdown(s) {
   if (!s.parts) return '';
   const p = s.parts;
@@ -317,7 +334,7 @@ function spotPopup(s) {
     </div>
     ${z ? `<a class="btn small block" style="margin-top:6px" target="_blank" rel="noopener" href="${zoneTourUrl(z, state.analysis)}">${icon('nav')} Giro della zona su Mapy</a>` : ''}
     ${navButtons(s.lat, s.lon, { small: true })}
-    <details class="pop-more"><summary>Dettagli</summary>${details}${scoreBreakdown(s)}
+    <details class="pop-more"><summary>Dettagli</summary>${timerText(s)}${details}${scoreBreakdown(s)}
       ${s.fungaia ? '' : `<button class="btn small block" style="margin-top:8px" data-block-spot="${s.id}">Spot inaccessibile (rovi, recinti…)</button>`}</details>
     ${s.fungaia ? `<button class="btn small block" style="margin-top:6px" data-open-place="${s.placeId}">Apri la scheda della fungaia</button>` : ''}`;
 }

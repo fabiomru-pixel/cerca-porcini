@@ -559,7 +559,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         protected: protectedAt(protectedFc, c.lat, c.lon),
         nearFind: nearFinds.some((f) => distKm(c, f) < 1),
         nearEmpty: (() => { const e = nearEmpties.filter((x) => distKm(c, x) <= 1.5 && daysBetween(x.date, date) >= 0 && daysBetween(x.date, date) <= 21).sort((a, b) => distKm(c, a) - distKm(c, b))[0]; return e ? { date: e.date, m: Math.round(distKm(c, e) * 1000) } : null; })(),
-        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate, staleDays: tm.staleDays, rainEvent: tm.rainEvent, saturated: !!tm.sat,
+        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate, staleDays: tm.staleDays, rainEvent: tm.rainEvent, saturated: !!tm.sat, timerInfo: tm.timerInfo,
         regime,
       };
     })
@@ -648,7 +648,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         forest: FORESTS[fk].label,
         forestType: patch ? `${patch.type}, copertura ${Math.round(patch.frac * 100)}%` : place.forest || null,
         rainTotal: Math.round(tm.rainTotal), daysSince: tm.daysSince, killers: tm.killers,
-        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate, staleDays: tm.staleDays, rainEvent: tm.rainEvent, saturated: !!tm.sat,
+        lastRainDays: tm.lastRainDays, lastRainDate: tm.lastRainDate, staleDays: tm.staleDays, rainEvent: tm.rainEvent, saturated: !!tm.sat, timerInfo: tm.timerInfo,
         protected: protectedAt(protectedFc, place.lat, place.lon),
         regime, idealDays: ideal.idealDays, idealSource: ideal.source,
         rainSrc: w.rainSrc,
