@@ -15,6 +15,7 @@ import { syncDrive, hasToken, uploadBackup, listBackups, downloadBackup } from '
 import { lon2px, lat2px, distKm, bearing, fmtDist, parseCoords, ASPECT_NAME } from './geo.js';
 import { addDays } from './engine.js';
 import { REGIMES } from './climate.js';
+import { harvestBan, HARVEST_LIMITS_URL } from './limits.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -299,7 +300,15 @@ function scoreBreakdown(s) {
     </div>`;
 }
 
+// Divieto di raccolta del giorno (Pistoia, Pescia: venerdì per tutti, martedì per i non residenti)
+function banHtml(b, style = '') {
+  if (!b) return '';
+  if (b.expired) return `<div class="alert small"${style}>Comune di ${esc(b.comune)}: il divieto di raccolta del ${b.day} valeva fino al ${itDate(b.to)}. <a href="${HARVEST_LIMITS_URL}" target="_blank" rel="noopener">Verifica se è stato rinnovato</a>.</div>`;
+  return `<div class="alert ${b.all ? 'bad' : 'warn'}"${style}><b>${b.all ? 'Raccolta vietata' : 'Raccolta vietata ai non residenti'} il ${b.day}</b> nel Comune di ${esc(b.comune)}${b.all ? ' (anche per i residenti)' : ''}: rischi la multa. Fino al ${itDate(b.to)} · ${esc(b.act)} · <a href="${HARVEST_LIMITS_URL}" target="_blank" rel="noopener">fonte Regione Toscana</a></div>`;
+}
+
 function spotPopup(s) {
+  const ban = banHtml(harvestBan(s.lat, s.lon, state.analysis?.date), ' style="margin:8px 0 0"');
   const prot = s.protected
     ? `<div class="alert ${s.protected.strict ? 'bad' : 'warn'}" style="margin:8px 0 0">${s.protected.strict ? 'Riserva integrale: raccolta quasi certamente vietata' : 'Area protetta: verifica il regolamento'} · <b>${esc(s.protected.name)}</b></div>` : '';
   const kill = s.killers.length ? `<div class="alert warn" style="margin:8px 0 0">Timer fermato da: ${s.killers.join(', ')}</div>` : '';
@@ -327,7 +336,7 @@ function spotPopup(s) {
         <div class="pop-sub">${s.elevation} m · ${s.aspectLabel} · ${s.slope}°</div></div>
     </div>
     <div class="pop-line">${rain}${road}</div>
-    ${prot}${kill}
+    ${ban}${prot}${kill}
     <div class="nav-row" style="margin-top:8px">
       <button class="btn small primary" data-walk-spot="${s.id}">${icon('walk')} A piedi qui</button>
       ${z ? `<button class="btn small primary" data-walk-zone="${z.id}">${icon('walk')} Giro zona ${z.id}</button>` : ''}
@@ -636,6 +645,21 @@ function renderResults() {
   const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}</div>`;
   const alerts = [];
   {
+    // divieti di raccolta nel giorno dell'analisi (per comune)
+    const bans = new Map();
+    for (const x of [a.center, ...a.spots, ...(a.fungaie || [])]) {
+      const b = harvestBan(x.lat, x.lon, a.date);
+      if (!b) continue;
+      const k = b.comune + (b.expired ? '-x' : '');
+      if (!bans.has(k)) bans.set(k, { b, n: 0 });
+      if (x !== a.center) bans.get(k).n++;
+    }
+    for (const { b, n } of bans.values()) {
+      const h = banHtml(b);
+      alerts.push(n && !b.expired ? h.replace('</b>', `</b> per ${n} spot/fungaie di questa analisi`) : h);
+    }
+  }
+  {
     const all = [...a.spots, ...(a.fungaie || [])];
     const stale = all.filter((x) => x.lastRainDays == null || x.lastRainDays > (x.staleDays || 20));
     const vd = a.summary.lastRainDays;
@@ -727,6 +751,7 @@ function renderSpots() {
       <div>
         <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.zone ? `<span class="pill zone">Zona ${s.zone}</span> ` : ''}${s.fungaia ? `<span class="pill ${s.offSeason ? '' : 'ok'}">tua fungaia${s.offSeason ? ' · fuori stagione' : ''}</span>` : ''}</div>
         <div class="m">${esc(s.forest)} · ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km${s.access ? ` · strada ${s.access.walkMin} min` : ''}</div>
+        ${(() => { const b = harvestBan(s.lat, s.lon, a.date); return b && !b.expired ? `<div class="m" style="color:var(${b.all ? '--danger' : '--warn'})">Raccolta vietata il ${b.day}${b.all ? '' : ' ai non residenti'} (Comune di ${esc(b.comune)})</div>` : ''; })()}
         ${s.protected ? `<div class="m" style="color:var(--danger)">${s.protected.strict ? 'Riserva integrale' : 'Area protetta'}: ${esc(s.protected.name)}</div>` : ''}
         ${s.killers.length ? `<div class="m" style="color:var(--warn)">Timer fermo: ${s.killers.join(', ')}</div>` : ''}
       </div>
