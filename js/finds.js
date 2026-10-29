@@ -238,6 +238,15 @@ async function dailyAround(lat, lon, date, before = 45) {
   const ageDays = Math.ceil((Date.now() - new Date(date + 'T12:00:00').getTime()) / 864e5);
   if (ageDays + before <= 88) {
     const [w] = await fetchDaily([{ lat, lon }], { pastDays: Math.max(1, ageDays + before), forecastDays: 1 });
+    // i modelli di previsione hanno solo le ultime ~5 settimane: i giorni più vecchi arrivano vuoti e venivano
+    // letti come 0 °C e 0 mm (ottobre 2026: ritrovamenti di settembre a "0 °C" → finestra termica spostata di −3 °C
+    // e spot sempre a Nord e in quota). Li completo con l'archivio.
+    const gaps = w.days.filter((d) => d.date <= date && (d.tmax == null || d.tmin == null));
+    if (gaps.length) {
+      const a = await fetchDailyArchive(lat, lon, gaps[0].date, gaps[gaps.length - 1].date);
+      const byDate = new Map(a.days.map((d) => [d.date, d]));
+      w.days = w.days.map((d) => (d.tmax == null || d.tmin == null) && byDate.has(d.date) ? { ...byDate.get(d.date) } : d);
+    }
     return w;
   }
   return fetchDailyArchive(lat, lon, addDays(date, -before), date);
@@ -250,7 +259,8 @@ async function dailyAround(lat, lon, date, before = 45) {
 // 4 = pioggia madre con la regola del timer: la più vecchia da 15 mm (somma dei giorni consecutivi) nei 20 giorni
 // 5 = + umidità dell'aria e vento medi dei 7 giorni prima (microclima)
 // 6 = seconda pioggia: rinforzo / nuovo timer / saturazione (timerState)
-export const SNAPSHOT_VER = 7; // 7: temperatura del terreno a 18 e 54 cm
+// 7 = temperatura del terreno a 18 e 54 cm
+export const SNAPSHOT_VER = 8; // 8: giorni oltre le 5 settimane presi dall'archivio (prima arrivavano vuoti = 0 °C)
 const MIN_FRUIT_DAYS = 5;
 
 async function snapshotFor(place, v, s) {
@@ -262,6 +272,7 @@ async function snapshotFor(place, v, s) {
   const g = s.gradient;
   const dT = ((place.elevation - w.elevation) * g) / 100;
   const win = w.days.slice(Math.max(0, idx - s.windowDays), idx);
+  if (win.some((d) => d.tmax == null || d.tmin == null)) return null; // dati mancanti: riprovo alla prossima apertura
   const meanT = win.reduce((a, d) => a + (d.tmax + d.tmin) / 2, 0) / win.length - dT;
   const meanMax = win.reduce((a, d) => a + d.tmax, 0) / win.length - dT;
   const tr = timerState(w.days, idx - s.rainWindowDays, idx - MIN_FRUIT_DAYS, s, place.forestKey || forestByElevation(place.elevation).key);
@@ -347,8 +358,10 @@ export async function processPending(settings) {
               p.temperature = false; changed = true;
             }
             if (p.snapshot) {
-              v.snapshot = await snapshotFor(place, v, settings);
-              p.snapshot = false; changed = true;
+              const snap = await snapshotFor(place, v, settings);
+              // dati meteo incompleti: tolgo quelli vecchi ma riprovo alla prossima apertura
+              if (snap || v.datetime.slice(0, 10) >= todayStr()) p.snapshot = false;
+              v.snapshot = snap; changed = true;
             }
           } catch (e) { console.warn('pending visit', v.id, e); }
           if (!p.temperature && !p.snapshot) delete v.pending;
