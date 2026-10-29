@@ -13,7 +13,7 @@ import {
 } from './finds.js';
 import { syncDrive, hasToken, uploadBackup, listBackups, downloadBackup } from './drive.js';
 import { lon2px, lat2px, distKm, bearing, fmtDist, parseCoords, ASPECT_NAME } from './geo.js';
-import { addDays } from './engine.js';
+import { addDays, HABITAT_MIN_M } from './engine.js';
 import { REGIMES } from './climate.js';
 import { harvestBan, HARVEST_LIMITS_URL } from './limits.js';
 
@@ -632,7 +632,7 @@ function renderResults() {
     const names = g.species.map((k) => SPECIES[k].common).join(', ');
     return `<div class="card band" style="--c:${G.color}">
       <div class="small muted">${esc(G.label)}${g.offSeason ? ' · fuori stagione' : g.weight < 1 ? ' · inizio/fine stagione' : ' · piena stagione'}</div>
-      <div class="big">${Math.round(g.band.lo)}–${Math.round(g.band.hi)} m</div>
+      <div class="big">${g.band.hi < HABITAT_MIN_M ? `sotto i ${HABITAT_MIN_M} m` : `${Math.round(Math.max(HABITAT_MIN_M, g.band.lo))}–${Math.round(g.band.hi)} m`}</div>
       <div class="small">${esc(names)} · ${g.band.tMin}–${g.band.tMax} °C al suolo</div>
     </div>`;
   }).join('');

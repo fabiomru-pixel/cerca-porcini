@@ -167,7 +167,8 @@ export function targetBand(meanT, valleyElev, gradient, groupKey, learn) {
   const lo = valleyElev + ((meanT - tMax) / gradient) * 100;
   const hi = valleyElev + ((meanT - tMin) / gradient) * 100;
   const mid = valleyElev + ((meanT - (tMin + tMax) / 2) / gradient) * 100;
-  return { lo: Math.max(0, lo), hi: Math.max(0, hi), mid: Math.max(0, mid), tMin, tMax };
+  const r1 = (x) => Math.round(x * 10) / 10;
+  return { lo: Math.max(0, lo), hi: Math.max(0, hi), mid: Math.max(0, mid), tMin: r1(tMin), tMax: r1(tMax) };
 }
 
 // ---------- Tipo di bosco atteso per quota (slide 19) ----------
@@ -191,6 +192,11 @@ export function forestTempOffset(h, forestKey) {
   const w = (h - 900) / 100;
   return FORESTS.quercia.tempOffsetC * (1 - w) + FORESTS.faggio.tempOffsetC * w;
 }
+
+// Sotto i 200 m (pianura, boschi lungo i fiumi, pioppete) non ci sono boschi da porcino: con l'autunno freddo
+// il solo calcolo termico portava gli spot a 60–150 m (ottobre 2026). Penalità forte, non un'esclusione.
+export const HABITAT_MIN_M = 200;
+export const habitatFactor = (h) => (h >= HABITAT_MIN_M ? 1 : Math.max(0.15, 1 - (HABITAT_MIN_M - h) / 150));
 
 // ---------- Idoneità del luogo ----------
 // cell: {elevation, slope, aspect, forestKey?}; ctx: {meanT, valleyElev, gradient, southOffsetM, learn}
@@ -233,8 +239,9 @@ export function evalPlace(cell, ctx, groupKey) {
   const terrainMax = cell.regime === 'A' || cell.regime === 'B' ? 1.15 * 1.25 : 1.15;
   // vento dopo la pioggia: i versanti colpiti si asciugano (tramontana -> esposti a N, ecc.)
   const windF = windFactor(cell.aspect, cell.slope, cell.wind);
-  const score = clamp(((thermal * (0.75 + 0.25 * band) * slopeS * expoPref) / terrainMax) * windF, 0, 1);
-  return { score, tLocal, thermal, band, slopeS, expoPref, expoC, forestC, windF, forestKey: cell.forestKey || forestByElevation(cell.elevation).key };
+  const habitat = habitatFactor(cell.elevation);
+  const score = clamp(((thermal * (0.75 + 0.25 * band) * slopeS * expoPref) / terrainMax) * windF * habitat, 0, 1);
+  return { score, habitat, tLocal, thermal, band, slopeS, expoPref, expoC, forestC, windF, forestKey: cell.forestKey || forestByElevation(cell.elevation).key };
 }
 
 // Interpolazione lineare a tratti su punti [x, y]
