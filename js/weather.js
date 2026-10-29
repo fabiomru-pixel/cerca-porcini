@@ -120,13 +120,16 @@ export async function fetchDaily(points, { pastDays = 30, forecastDays = 16, onW
 // riportata alla quota del posto (0,55 °C ogni 100 m). Solo registrata nei ritrovamenti per tarare in futuro una
 // soglia sul substrato (richiesta dell'utente, ottobre 2026): non entra nei voti. Sempre ICON, per valori confrontabili.
 const HIST_FORECAST = 'https://historical-forecast-api.open-meteo.com/v1/forecast';
-export async function subsoilTemp(lat, lon, date, elevation) {
+export async function subsoilTemp(lat, lon, date, elevation, days = 7) {
   const end = new Date(date + 'T12:00:00');
-  const start = new Date(end.getTime() - 7 * 864e5);
+  const start = new Date(end.getTime() - days * 864e5);
   const iso = (d) => d.toLocaleDateString('sv-SE');
   const recent = Date.now() - end.getTime() < 3 * 864e5; // l'archivio dei modelli arriva con 1–2 giorni di ritardo
   const p = new URLSearchParams({ latitude: lat, longitude: lon, hourly: 'soil_temperature_18cm,soil_temperature_54cm', models: 'icon_seamless', timezone: 'Europe/Rome' });
-  if (recent) { p.set('past_days', '10'); p.set('forecast_days', '1'); } else { p.set('start_date', iso(start)); p.set('end_date', iso(end)); }
+  if (recent) {
+    p.set('past_days', String(Math.max(10, days + 3)));
+    p.set('forecast_days', String(Math.min(16, Math.max(1, Math.ceil((end - Date.now()) / 864e5) + 1)))); // giorno futuro: previsione
+  } else { p.set('start_date', iso(start)); p.set('end_date', iso(end)); }
   const url = `${recent ? FORECAST : HIST_FORECAST}?${p}`;
   let j = null;
   for (let i = 0; i < 2 && !j; i++) {

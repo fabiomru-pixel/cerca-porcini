@@ -1,7 +1,7 @@
 // Analisi completa: meteo + altimetria + bosco + regole -> mappa di idoneità e spot consigliati
 import { GROUPS, FORESTS, SPECIES, BUILT_MIN_M, BLOCK_KM } from './config.js';
 import { loadMosaic, terrainAtPoint } from './dem.js';
-import { fetchDaily } from './weather.js';
+import { fetchDaily, subsoilTemp } from './weather.js';
 import { forestRaster, forestPatch, fetchProtected, protectedAt, builtRaster, nearBuiltGrid, canopyPatch, mapSource } from './sources.js';
 import { distKm, bboxAround, aspectLabel, metersPerPixel, ASPECT_DEG, angDiff } from './geo.js';
 import { contourLines } from './contours.js';
@@ -150,9 +150,17 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const tc = tempClass(summary, clim);
   const hot = tc.high || tc.maxAnom; // caldo sopra la media del periodo
 
+  // Temperatura che conta per il micelio: quella del terreno a 18 cm (modello ICON), media degli stessi giorni,
+  // riportata alla quota della valle (richiesta dell'utente, ottobre 2026). In autunno il terreno in quota resta più
+  // caldo dell'aria: la stima dall'aria dava ~7 °C a 1000 m con il terreno a 11 °C e spingeva gli spot in pianura.
+  // Se il dato del terreno manca si usa l'aria, come prima.
+  onStep('Leggo la temperatura del terreno…', 0.37);
+  const soilRef = await subsoilTemp(center.lat, center.lon, date, valleyElev, s.windowDays).catch(() => null);
+  const thermalRef = soilRef?.t18 != null ? { t: soilRef.t18, src: 'terreno' } : { t: summary.meanT, src: 'aria' };
+
   const groups = activeGroups(date, s.species).map((g) => ({
     ...g,
-    band: targetBand(summary.meanT, valleyElev, s.gradient, g.key, learn),
+    band: targetBand(thermalRef.t, valleyElev, s.gradient, g.key, learn),
   }));
 
   // griglia di campionamento
@@ -203,7 +211,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   const saStep = Math.max(1, Math.round(70 / mpp));
   const img = new Uint8ClampedArray(OW * OH * 4);
   const cands = [];
-  const ctx = { meanT: summary.meanT, meanMax: summary.meanMax, valleyElev, gradient: s.gradient, southOffsetM: s.southOffsetM, learn };
+  const ctx = { meanT: thermalRef.t, meanMax: summary.meanMax, valleyElev, gradient: s.gradient, southOffsetM: s.southOffsetM, learn };
   const allNearFinds = finds.filter((f) => f.lat && distKm(center, f) < radius + 5);
   // Una fungaia vale come fungaia solo nella stagione delle specie trovate lì (regola dell'utente, ottobre 2026:
   // la fungaia di porcini estivi di Tobbiana dava 100 a fine ottobre). Fuori stagione è un posto come gli altri,
@@ -737,7 +745,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     createdAt: new Date().toISOString(),
     date, center, radius, valleyElev,
     settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto', forestPref: s.forestPref || 'auto' },
-    summary, dayIndex, groups, timers, spots: final, fungaie, zones, overlay, contours,
+    summary, thermalRef, dayIndex, groups, timers, spots: final, fungaie, zones, overlay, contours,
     scan: { areas: areas.length, fine: true, excludedFar, maxWalk },
     protectedFc, forestChecked: !!forest, mapSrc: { ...mapSource }, demZoom: mosaic.z,
     clim, tc,

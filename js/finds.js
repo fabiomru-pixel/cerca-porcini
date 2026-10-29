@@ -260,7 +260,8 @@ async function dailyAround(lat, lon, date, before = 45) {
 // 5 = + umidità dell'aria e vento medi dei 7 giorni prima (microclima)
 // 6 = seconda pioggia: rinforzo / nuovo timer / saturazione (timerState)
 // 7 = temperatura del terreno a 18 e 54 cm
-export const SNAPSHOT_VER = 8; // 8: giorni oltre le 5 settimane presi dall'archivio (prima arrivavano vuoti = 0 °C)
+// 8 = giorni oltre le 5 settimane presi dall'archivio (prima arrivavano vuoti = 0 °C)
+export const SNAPSHOT_VER = 9; // 9: temperatura al suolo dal terreno a 18 cm invece che dall'aria
 const MIN_FRUIT_DAYS = 5;
 
 async function snapshotFor(place, v, s) {
@@ -293,15 +294,18 @@ async function snapshotFor(place, v, s) {
   const heat = maxT > clim.maxAnom || maxT >= 30;
   const wind = windy;
   const tc = tempClass({ meanT, meanMax }, clim);
+  const subsoil = await subsoilTemp(place.lat, place.lon, date, place.elevation, s.windowDays).catch(() => null);
+  const soilT = subsoil?.t18 ?? meanT; // terreno a 18 cm, come nell'analisi; se manca, l'aria
   const dry = soilTheta < 0.3 || rain < s.rainMinMm;
 
   return {
     ver: SNAPSHOT_VER,
-    subsoil: await subsoilTemp(place.lat, place.lon, date, place.elevation).catch(() => null),
+    subsoil,
+    groundSrc: subsoil?.t18 != null ? 'terreno' : 'aria',
     rainSrc: w.rainSrc?.type === 'pluviometri' ? { type: 'pluviometri', stations: w.rainSrc.stations } : { type: 'modelli' },
     meanT: Math.round(meanT * 10) / 10,
     meanMax: Math.round(meanMax * 10) / 10,
-    groundT: Math.round((meanT + expo + forestTempOffset(place.elevation, place.forestKey)) * 10) / 10,
+    groundT: Math.round((soilT + expo + forestTempOffset(place.elevation, place.forestKey)) * 10) / 10,
     daysSince: tr ? idx - tr.timerIdx : null,
     air: airMoisture(w.days, idx - 1), // umidità dell'aria e vento medi nei 7 giorni prima del ritrovamento
     rainTotal: Math.round(rain),

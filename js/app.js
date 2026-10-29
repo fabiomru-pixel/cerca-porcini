@@ -633,7 +633,7 @@ function renderResults() {
     return `<div class="card band" style="--c:${G.color}">
       <div class="small muted">${esc(G.label)}${g.offSeason ? ' · fuori stagione' : g.weight < 1 ? ' · inizio/fine stagione' : ' · piena stagione'}</div>
       <div class="big">${g.band.hi < HABITAT_MIN_M ? `sotto i ${HABITAT_MIN_M} m` : `${Math.round(Math.max(HABITAT_MIN_M, g.band.lo))}–${Math.round(g.band.hi)} m`}</div>
-      <div class="small">${esc(names)} · ${g.band.tMin}–${g.band.tMax} °C al suolo</div>
+      <div class="small">${esc(names)} · ${g.band.tMin}–${g.band.tMax} °C ${a.thermalRef?.src === 'terreno' ? 'nel terreno (18 cm)' : 'al suolo'}</div>
     </div>`;
   }).join('');
   const timerRow = (fk) => {
@@ -644,6 +644,7 @@ function renderResults() {
   };
   const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}</div>`;
   const alerts = [];
+  if (a.thermalRef?.src === 'aria') alerts.push('<div class="alert warn small">Temperatura del terreno non disponibile: quote calcolate dalla temperatura dell’aria (in autunno sottostima il caldo del terreno in quota).</div>');
   {
     // divieti di raccolta nel giorno dell'analisi (per comune)
     const bans = new Map();
@@ -703,6 +704,7 @@ function renderResults() {
     ${dayHtml}
     <div class="kpis">
       <div class="kpi"><b>${fmt1(s.meanT)}°</b><span>T media valle (${a.settings.windowDays} gg)</span></div>
+      ${a.thermalRef?.src === 'terreno' ? `<div class="kpi"><b>${fmt1(a.thermalRef.t)}°</b><span>terreno 18 cm in valle</span></div>` : ''}
       <div class="kpi"><b>${fmt1(s.meanMax)}° / ${fmt1(s.meanMin)}°</b><span>media max / min</span></div>
       <div class="kpi"><b>${Math.round(s.rainTotal)} mm</b><span>pioggia 20 gg ${s.rainOk ? '<span class="pill ok">ok</span>' : '<span class="pill bad">poca</span>'}</span></div>
     </div>
