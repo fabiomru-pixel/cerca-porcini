@@ -307,6 +307,35 @@ function banHtml(b, style = '') {
   return `<div class="alert ${b.all ? 'bad' : 'warn'}"${style}><b>${b.all ? 'Raccolta vietata' : 'Raccolta vietata ai non residenti'} il ${b.day}</b> nel Comune di ${esc(b.comune)}${b.all ? ' (anche per i residenti)' : ''}: rischi la multa. Fino al ${itDate(b.to)} · ${esc(b.act)} · <a href="${HARVEST_LIMITS_URL}" target="_blank" rel="noopener">fonte Regione Toscana</a></div>`;
 }
 
+// Foto a schermo intero. È un <dialog> anch'esso: con la scheda della fungaia aperta (modale) tutto il resto della
+// pagina non riceve i tocchi, e una foto aggiunta lì non si chiudeva più (ottobre 2026). Si chiude toccando la foto,
+// con la X o con il tasto Indietro (la voce nella cronologia evita che Indietro chiuda l'app).
+let lightbox = null, lightboxBackPending = false;
+function closeLightbox(viaBack) {
+  const d = lightbox;
+  if (!d) return;
+  lightbox = null;
+  if (d.open) d.close();
+  d.remove();
+  if (!viaBack) { lightboxBackPending = true; history.back(); }
+}
+addEventListener('popstate', () => {
+  if (lightboxBackPending) { lightboxBackPending = false; return; } // il passo indietro fatto da noi alla chiusura
+  closeLightbox(true);
+});
+function openLightbox(src) {
+  if (lightbox || lightboxBackPending) return; // il passo indietro è asincrono: non aprire finché non è concluso
+  const d = document.createElement('dialog');
+  d.className = 'lightbox';
+  d.innerHTML = `<img src="${src}" alt=""><button type="button" class="lb-close" aria-label="Chiudi">×</button>`;
+  document.body.appendChild(d);
+  d.onclick = () => closeLightbox(false);
+  d.oncancel = (e) => { e.preventDefault(); closeLightbox(false); }; // Esc sul PC
+  lightbox = d;
+  history.pushState({ lightbox: 1 }, '');
+  d.showModal();
+}
+
 function spotPopup(s) {
   const ban = banHtml(harvestBan(s.lat, s.lon, state.analysis?.date), ' style="margin:8px 0 0"');
   const prot = s.protected
@@ -1084,10 +1113,7 @@ async function openView(id) {
       <button class="btn" id="viewEditPlace">Modifica luogo</button>
       <button class="btn danger" id="viewDelete">Elimina</button>
     </div>`;
-  $$('#viewBody [data-full]').forEach((img) => img.onclick = () => {
-    const lb = document.createElement('div'); lb.className = 'lightbox'; lb.innerHTML = `<img src="${img.src}" alt="">`;
-    lb.onclick = () => lb.remove(); document.body.appendChild(lb);
-  });
+  $$('#viewBody [data-full]').forEach((img) => img.onclick = () => openLightbox(img.src));
   $$('#viewBody [data-edit]').forEach((b) => b.onclick = () => { $('#viewDlg').close(); openFindForm('editVisit', f.id, b.dataset.edit); });
   $('#viewDelete').onclick = async () => {
     if (!confirm('Eliminare tutta la fungaia con i suoi ritrovamenti? Verrà rimossa anche da Drive alla prossima sincronizzazione.')) return;
