@@ -336,6 +336,16 @@ function openLightbox(src) {
   d.showModal();
 }
 
+// Spot entro 1,5 km da dove hai già trovato porcini della stagione giusta (specie "non so": sempre).
+// Il voto resta quello; è un'informazione a parte: l'app non può sapere dove c'è il micelio, lo impara dalle tue uscite.
+const PROVEN_KM = 1.5;
+function isProven(s, date) {
+  if (s.fungaia || !date) return false;
+  const m = Number(date.slice(5, 7));
+  return (state.finds || []).some((f) => !f.deleted && f.lat != null && distKm(s, f) <= PROVEN_KM
+    && (f.visits || []).some((v) => v.count > 0 && v.kind !== 'altro' && (!v.species || SPECIES[v.species]?.months.includes(m))));
+}
+
 function spotPopup(s) {
   const ban = banHtml(harvestBan(s.lat, s.lon, state.analysis?.date), ' style="margin:8px 0 0"');
   const prot = s.protected
@@ -365,7 +375,7 @@ function spotPopup(s) {
         <div class="pop-sub">${s.elevation} m · ${s.aspectLabel} · ${s.slope}°</div></div>
     </div>
     <div class="pop-line">${rain}${road}</div>
-    ${ban}${prot}${kill}
+    ${isProven(s, state.analysis?.date) ? '<div class="alert ok small" style="margin:8px 0 0"><b>Zona provata</b>: entro 1,5 km hai già trovato porcini.</div>' : ''}${ban}${prot}${kill}
     <div class="nav-row" style="margin-top:8px">
       <button class="btn small primary" data-walk-spot="${s.id}">${icon('walk')} A piedi qui</button>
       ${z ? `<button class="btn small primary" data-walk-zone="${z.id}">${icon('walk')} Giro zona ${z.id}</button>` : ''}
@@ -673,6 +683,8 @@ function renderResults() {
   };
   const timerCard = `<div class="card small">${timerRow('quercia')}${timerRow('faggio')}</div>`;
   const alerts = [];
+  alerts.push('<div class="alert small">Il voto dice quanto temperatura, pioggia e terreno sono adatti, <b>non se i porcini ci sono</b>: anche con condizioni ideali molte uscite restano a vuoto.</div>');
+  { const n = a.spots.filter((x) => isProven(x, a.date)).length; if (n) alerts.push(`<div class="alert ok small"><b>${n} spot</b> in zona provata: entro 1,5 km hai già trovato porcini.</div>`); }
   if (a.thermalRef?.src === 'aria') alerts.push('<div class="alert warn small">Temperatura del terreno non disponibile: quote calcolate dalla temperatura dell’aria (in autunno sottostima il caldo del terreno in quota).</div>');
   {
     // divieti di raccolta nel giorno dell'analisi (per comune)
@@ -726,7 +738,7 @@ function renderResults() {
   else if (di?.level === 'senza conferme') dayHtml = '<div class="alert small">Giornata <b>senza conferme</b>: nessuna tua uscita negli ultimi 14 giorni entro 30 km. I voti si basano solo su meteo e terreno.</div>';
   else if (di) {
     const n = di.empty.length;
-    dayHtml = `<div class="alert ${di.level === 'bassa' ? 'bad' : 'warn'}"><b>Giornata ${di.level}</b> · ${n} uscit${n === 1 ? 'a' : 'e'} senza porcini negli ultimi 14 giorni entro 30 km (${di.empty.map((e) => itDate(e.date)).join(', ')}): il bosco della zona non sta producendo porcini. Voti ridotti del ${Math.round((1 - di.factor) * 100)}%. Risalgono quando trovi porcini o dopo una nuova pioggia.</div>`;
+    dayHtml = `<div class="alert ${di.level === 'bassa' ? 'bad' : 'warn'}"><b>Giornata ${di.level}</b> · ${n} uscit${n === 1 ? 'a' : 'e'} senza porcini negli ultimi 14 giorni entro 30 km (${di.empty.map((e) => itDate(e.date)).join(', ')}): ${di.lastPorcini ? "dopo gli ultimi porcini il bosco non conferma." : "il bosco della zona non sta producendo porcini."} Voti ridotti del ${Math.round((1 - di.factor) * 100)}%.${di.lastPorcini ? ` Ultimi porcini: ${itDate(di.lastPorcini.date)}, a ${di.lastPorcini.km} km.` : ''} Risalgono quando trovi porcini o dopo una nuova pioggia.</div>`;
   }
   el.innerHTML = `
     <h3>Condizioni ${a.date === todayStr() ? 'di oggi' : 'per ' + itDate(a.date)}</h3>
@@ -780,7 +792,7 @@ function renderSpots() {
     <div class="card click spot${s.fungaia ? ' fung' : ''}" data-id="${s.id}">
       <div class="score" style="background:${scoreColor(s.score)};color:${scoreFg(s.score)}">${s.score}</div>
       <div>
-        <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.zone ? `<span class="pill zone">Zona ${s.zone}</span> ` : ''}${s.fungaia ? `<span class="pill ${s.offSeason ? '' : 'ok'}">tua fungaia${s.offSeason ? ' · fuori stagione' : ''}</span>` : ''}</div>
+        <div class="t">${s.id} · ${s.elevation} m · ${s.aspectLabel} ${s.zone ? `<span class="pill zone">Zona ${s.zone}</span> ` : ''}${isProven(s, a.date) ? '<span class="pill ok">zona provata</span> ' : ''}${s.fungaia ? `<span class="pill ${s.offSeason ? '' : 'ok'}">tua fungaia${s.offSeason ? ' · fuori stagione' : ''}</span>` : ''}</div>
         <div class="m">${esc(s.forest)} · ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km${s.access ? ` · strada ${s.access.walkMin} min` : ''}</div>
         ${(() => { const b = harvestBan(s.lat, s.lon, a.date); return b && !b.expired ? `<div class="m" style="color:var(${b.all ? '--danger' : '--warn'})">Raccolta vietata il ${b.day}${b.all ? '' : ' ai non residenti'} (Comune di ${esc(b.comune)})</div>` : ''; })()}
         ${s.protected ? `<div class="m" style="color:var(--danger)">${s.protected.strict ? 'Riserva integrale' : 'Area protetta'}: ${esc(s.protected.name)}</div>` : ''}

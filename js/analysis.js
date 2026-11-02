@@ -90,14 +90,18 @@ export function dayIndexOf(outings, center, date, days, s) {
   }
   const list = [...byDate.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
   const lastPorcini = list.find((d) => d.porcini && d.age <= 7) || null;
-  if (lastPorcini) return { factor: 1, level: 'buona', lastPorcini: { date: lastPorcini.date, km: Math.round(lastPorcini.km) }, empty: [], n: list.length };
+  const lastP = lastPorcini ? { date: lastPorcini.date, km: Math.round(lastPorcini.km) } : null;
+  // dopo gli ultimi porcini contano solo le uscite successive (due giorni dopo il ritrovamento del 31/10/2026, con due
+  // uscite senza porcini, la giornata risultava ancora "buona" e gli spot arrivavano a 84)
+  const relevant = lastPorcini ? list.filter((d) => d.date > lastPorcini.date) : list;
+  if (lastPorcini && !relevant.length) return { factor: 1, level: 'buona', lastPorcini: lastP, empty: [], n: list.length };
   if (!list.length) return { factor: 1, level: 'senza conferme', empty: [], n: 0 };
   // piogge dopo ogni uscita (episodi da almeno 15 mm, giorno in cui si arriva a 15)
   const idx = days.findIndex((d) => d.date === date);
   const eps = idx > 0 ? rainEpisodes(days, Math.max(0, idx - DAY_WIN - 1), idx, 15) : [];
   let sumW = 0;
   const empty = [];
-  for (const d of list) {
+  for (const d of relevant) {
     if (d.porcini) continue; // porcini oltre i 7 giorni: non pesano né in un senso né nell'altro
     let w = 1 - d.age / DAY_WIN;
     const after = eps.find((e) => days[e.endIdx].date > d.date);
@@ -107,7 +111,7 @@ export function dayIndexOf(outings, center, date, days, s) {
     empty.push({ date: d.date, km: Math.round(d.km), rainReset: !!rainReset });
   }
   const factor = Math.max(0.3, Math.exp(-0.35 * sumW));
-  return { factor: Math.round(factor * 100) / 100, level: factor >= 0.85 ? 'discreta' : factor >= 0.55 ? 'media' : 'bassa', empty, n: list.length };
+  return { factor: Math.round(factor * 100) / 100, level: factor >= 0.85 ? 'discreta' : factor >= 0.55 ? 'media' : 'bassa', lastPorcini: lastP, empty, n: list.length };
 }
 
 export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = [], empties = [], blocked = [], outings = [], onStep = () => {} }) {

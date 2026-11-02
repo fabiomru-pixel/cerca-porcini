@@ -422,19 +422,13 @@ export function computeLearn(allFinds) {
     out.timerN[fk] = xs.length;
   }
 
-  // 3. umidità del suolo: dove trovi con suolo più asciutto la curva diventa meno severa,
-  //    le uscite a vuoto con suolo umido e timer giusto la rendono più severa
+  // 3. umidità del suolo: dove trovi con suolo più asciutto la curva diventa meno severa
   {
     let sum = 0, ws = 0;
     for (const e of pos) if (e.s.soilTheta != null) { const w = weight(e); sum += w * (e.s.soilTheta - 0.55); ws += w; }
-    let shift = ws ? shrink(sum, ws) : 0;
-    let push = 0;
-    for (const e of neg) {
-      if (e.s.soilTheta == null || e.s.daysSince == null) continue;
-      const t = forestTimer(e.s.forestKey || 'quercia');
-      if (e.s.soilTheta >= 0.45 && e.s.daysSince >= t.start && e.s.daysSince <= t.end) push += 0.03;
-    }
-    out.soilShift = Math.round(clampN(shift + Math.min(0.1, push), -0.2, 0.2) * 100) / 100;
+    // solo i ritrovamenti: le uscite a vuoto con suolo umido non dicono che il suolo sia il problema
+    const shift = ws ? shrink(sum, ws) : 0;
+    out.soilShift = Math.round(clampN(shift, -0.2, 0.2) * 100) / 100;
     out.soilN = pos.filter((e) => e.s.soilTheta != null).length + neg.filter((e) => e.s.soilTheta != null).length;
   }
 

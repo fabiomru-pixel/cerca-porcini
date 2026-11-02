@@ -451,9 +451,11 @@ export const SOIL_CLASSES = {
   secco:  { label: 'Suolo secco' },
 };
 
-// Fattore suolo continuo (0–1) dall'umidità: 70% e oltre = ideale, poi cala sempre più in fretta
+// Fattore suolo continuo (0–1) dall'umidità: 50% e oltre = ideale, sotto il 35% cala in fretta.
+// Porcini dell'utente trovati con il 36–58% (settembre 2026): la curva di prima dava 0,5 al 36% e 1 solo dal 70%,
+// e penalizzava proprio quei giorni rispetto alle uscite a vuoto di ottobre con suolo saturo.
 export function moistureFactor(theta) {
-  return piecewise(theta, [[0, 0.05], [0.2, 0.2], [0.35, 0.5], [0.5, 0.8], [0.7, 1]]);
+  return piecewise(theta, [[0, 0.05], [0.2, 0.35], [0.35, 0.85], [0.5, 1]]);
 }
 
 export function soilMoisture(days, idx) {
