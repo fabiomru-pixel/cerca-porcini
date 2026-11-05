@@ -1618,9 +1618,10 @@ async function finishNav(sum) {
   showOutingDialog(out);
 }
 
-// ritrovamenti salvati durante un giro: porcini e, a parte, altri funghi
-function outingFinds(o) {
-  const end = o.endedAt || new Date().toISOString();
+// ritrovamenti salvati durante un giro: porcini e, a parte, altri funghi.
+// extraMin: conta anche quelli salvati subito dopo la fine (risposta "No, ho trovato" e poi scheda compilata)
+function outingFinds(o, extraMin = 0) {
+  const end = o.endedAt ? new Date(new Date(o.endedAt).getTime() + extraMin * 60000).toISOString() : new Date().toISOString();
   let found = 0, other = 0;
   for (const f of state.finds) for (const x of f.visits || []) {
     const t = x.createdAt || x.datetime || '';
@@ -1630,18 +1631,21 @@ function outingFinds(o) {
   return { found, other };
 }
 
-// giri salvati prima della 1.29.1: "trovato" anche con soli altri funghi
+// Giri segnati "trovato" senza porcini salvati durante il giro: prima della 1.29.1 bastavano altri funghi, e con
+// "No, ho trovato" a fine giro restava "porcini" anche salvando poi solo mazze (novembre 2026). Si ricontano i
+// ritrovamenti fino a 3 ore dopo la fine: con soli altri funghi il giro diventa "solo altri funghi".
 async function fixOutingOutcomes() {
   const list = (await kv.get('outings')) || [];
   let ch = false;
   for (const o of list) {
-    if (o.outcome !== 'trovato' || o.other != null) continue;
-    const r = outingFinds(o);
+    if (o.outcome !== 'trovato' || o.found > 0) continue;
+    const r = outingFinds(o, 180);
+    if (r.found === o.found && r.other === o.other && !(r.other && !r.found)) continue;
     o.found = r.found; o.other = r.other;
     if (!r.found && r.other) o.outcome = 'altri';
     ch = true;
   }
-  if (ch) { await kv.set('outings', list); markDirty(); }
+  if (ch) { await kv.set('outings', list); markDirty(); renderOutings(); }
 }
 
 function outingSummaryHtml(o) {
