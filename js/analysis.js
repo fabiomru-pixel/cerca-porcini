@@ -213,6 +213,19 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   await new Promise((r) => setTimeout(r, 30));
   const mpp = metersPerPixel(lat, mosaic.z);
   const saStep = Math.max(1, Math.round(70 / mpp));
+  // Pendenza massima (scelta dell'utente: oltre i 12–14° è faticoso e pericoloso). La pendenza dello spot è una media
+  // su ~90 m e spiana ripe e scarpate (novembre 2026: spot "sopra 80" vicino a Baggio impraticabile): si guarda anche
+  // il tratto più ripido entro ~60 m, misurato fine, che può superare il limite di poco ma non di 6°.
+  const maxSlope = s.maxSlope ?? 14;
+  const steepNear = (m, px, py, mppF) => {
+    const d = Math.max(1, Math.round(20 / mppF));
+    let mx = 0;
+    for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+      if (dx * dx + dy * dy > 9) continue;
+      mx = Math.max(mx, m.slopeAspectPx(px + dx * d, py + dy * d, 1).slope);
+    }
+    return mx;
+  };
   const img = new Uint8ClampedArray(OW * OH * 4);
   const cands = [];
   const ctx = { meanT: thermalRef.t, meanMax: summary.meanMax, valleyElev, gradient: s.gradient, southOffsetM: s.southOffsetM, learn };
@@ -285,6 +298,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
       const elevation = mosaic.at(px, py);
       if (elevation < 50 || elevation > 2100) continue;
       const { slope, aspect } = mosaic.slopeAspectPx(px, py, saStep);
+      if (slope > maxSlope + 4) continue; // troppo ripido (controllo fine nella 2a passata)
       if (aspectTarget != null && (slope < 3 || angDiff(aspect, aspectTarget) > 30)) continue; // esposizione scelta
       const fk = userForest(ll) || cellForestKey(elevation, forest?.code[k]);
       if (forestPref && fk !== forestPref) continue; // tipo di bosco scelto
@@ -370,6 +384,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
         const elevation = m.at(px, py);
         if (elevation < 50 || elevation > 2100) continue;
         const { slope, aspect } = m.slopeAspectPx(px, py, saF);
+        if (slope > maxSlope || steepNear(m, px, py, mppF) > maxSlope + 6) continue; // troppo ripido o con scarpate vicine
         if (aspectTarget != null && (slope < 3 || angDiff(aspect, aspectTarget) > 30)) continue;
         // margini e radure: bosco presente ma non uniforme nei ~150 m attorno
         let edge = 1;
@@ -750,7 +765,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     date, center, radius, valleyElev,
     settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto', forestPref: s.forestPref || 'auto' },
     summary, thermalRef, dayIndex, groups, timers, spots: final, fungaie, zones, overlay, contours,
-    scan: { areas: areas.length, fine: true, excludedFar, maxWalk },
+    scan: { areas: areas.length, fine: true, excludedFar, maxWalk, maxSlope },
     protectedFc, forestChecked: !!forest, mapSrc: { ...mapSource }, demZoom: mosaic.z,
     clim, tc,
   };

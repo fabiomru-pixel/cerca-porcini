@@ -1,7 +1,7 @@
 // Regole di base (dalle slide) e parametri predefiniti.
 // Tutto ciò che è "regolabile" finisce nelle impostazioni utente (db 'settings').
 
-export const APP_VERSION = '1.35.1';
+export const APP_VERSION = '1.36.0';
 
 export const DEFAULT_SETTINGS = {
   gradient: 0.6,          // °C ogni 100 m (regolabile 0,6–0,7)
@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = {
   southOffsetM: 175,      // versante Sud percepito 150–200 m più in basso
   maxSpots: 25,
   maxWalkMin: 40,         // oltre questi minuti a piedi dalla strada lo spot non conta
+  maxSlope: 14,           // pendenza massima degli spot (gradi): oltre è faticoso e pericoloso (scelta dell'utente, novembre 2026)
   theme: 'auto',          // auto | light | dark
   // Client ID OAuth pubblico (progetto Google Cloud "cerca-porcini"): non è un segreto
   driveClientId: '516872585382-51m78latk5r073hl7dftqs6ggj44sstu.apps.googleusercontent.com',

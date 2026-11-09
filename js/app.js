@@ -513,7 +513,7 @@ function renderControls() {
   renderVoiceSeg();
   $('#windowDays').value = s.windowDays; $('#windowDaysVal').textContent = `${s.windowDays} gg`;
   $('#gradient').value = s.gradient; $('#gradientVal').textContent = s.gradient.toFixed(2).replace('.', ',');
-  for (const k of ['rainMinMm', 'rainEventMm', 'southOffsetM', 'maxSpots', 'maxWalkMin']) $('#' + k).value = s[k];
+  for (const k of ['rainMinMm', 'rainEventMm', 'southOffsetM', 'maxSpots', 'maxWalkMin', 'maxSlope']) $('#' + k).value = s[k];
   $('#driveClientId').value = s.driveClientId || '';
 }
 
@@ -643,7 +643,7 @@ function soilLine(a) {
 async function saveToHistory(a) {
   const light = {
     id: a.createdAt, createdAt: a.createdAt, date: a.date, center: a.center, radius: a.radius, valleyElev: a.valleyElev,
-    settings: { ...a.settings, aspectPref: state.settings.aspectPref, forestPref: state.settings.forestPref, maxWalkMin: state.settings.maxWalkMin, species: state.settings.species },
+    settings: { ...a.settings, aspectPref: state.settings.aspectPref, forestPref: state.settings.forestPref, maxWalkMin: state.settings.maxWalkMin, maxSlope: state.settings.maxSlope, species: state.settings.species },
     summary: { meanT: a.summary.meanT, meanMax: a.summary.meanMax, meanMin: a.summary.meanMin, rainTotal: a.summary.rainTotal, soilTheta: a.summary.soilTheta, lastEpisode: a.summary.lastEpisode, timerEpisode: a.summary.timerEpisode },
     clim: a.clim, tc: a.tc, timers: a.timers, scan: a.scan,
     groups: a.groups.map((g) => ({ key: g.key, species: g.species, band: g.band })),
@@ -713,6 +713,7 @@ function renderResults() {
     const ne = a.spots.filter((x) => x.nearEmpty).length;
     if (ne) alerts.push(`<div class="alert warn">${ne} spot sono vicini a tue uscite a vuoto recenti: punteggio ridotto (la penalità svanisce in 3 settimane o se torna a piovere).</div>`);
   }
+  if (a.scan?.maxSlope != null) alerts.push(`<div class="alert ok small">Solo spot con pendenza fino a <b>${a.scan.maxSlope}°</b> e senza scarpate vicine (limite modificabile in Opzioni). Le tue fungaie restano visibili anche se più ripide.</div>`);
   if (a.scan?.excludedFar) alerts.push(`<div class="alert ok small">Esclusi ${a.scan.excludedFar} spot buoni ma a più di ${a.scan.maxWalk} minuti a piedi dalla strada più vicina (limite modificabile in Opzioni).</div>`);
   if (a.fungaie?.length) {
     const top = a.fungaie[0];
@@ -1850,7 +1851,7 @@ function bindUI() {
   $$('#voiceSeg button').forEach((b) => b.onclick = () => { saveSettings({ navVoice: b.dataset.v === '1' }); renderVoiceSeg(); nav?.setVoice(state.settings.navVoice); });
   $('#windowDays').oninput = (e) => { $('#windowDaysVal').textContent = `${e.target.value} gg`; saveSettings({ windowDays: Number(e.target.value) }); };
   $('#gradient').oninput = (e) => { $('#gradientVal').textContent = Number(e.target.value).toFixed(2).replace('.', ','); saveSettings({ gradient: Number(e.target.value) }); };
-  for (const k of ['rainMinMm', 'rainEventMm', 'southOffsetM', 'maxSpots', 'maxWalkMin']) {
+  for (const k of ['rainMinMm', 'rainEventMm', 'southOffsetM', 'maxSpots', 'maxWalkMin', 'maxSlope']) {
     $('#' + k).onchange = (e) => { const v = Number(e.target.value); if (!isNaN(v) && v >= 0) saveSettings({ [k]: v }); };
   }
   $('#driveClientId').onchange = async (e) => { await saveSettings({ driveClientId: e.target.value.trim(), driveFolderId: '' }); renderSyncStatus(); };
