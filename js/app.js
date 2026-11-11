@@ -350,7 +350,8 @@ function spotPopup(s) {
   const ban = banHtml(harvestBan(s.lat, s.lon, state.analysis?.date), ' style="margin:8px 0 0"');
   const prot = s.protected
     ? `<div class="alert ${s.protected.strict ? 'bad' : 'warn'}" style="margin:8px 0 0">${s.protected.strict ? 'Riserva integrale: raccolta quasi certamente vietata' : 'Area protetta: verifica il regolamento'} · <b>${esc(s.protected.name)}</b></div>` : '';
-  const kill = s.killers.length ? `<div class="alert warn" style="margin:8px 0 0">Timer fermato da: ${s.killers.join(', ')}</div>` : '';
+  const kill = s.killers.length ? `<div class="alert warn" style="margin:8px 0 0">Timer frenato da: ${s.killers.join(', ')}</div>` : '';
+  const cut = s.cut ? `<div class="alert small" style="margin:8px 0 0">Taglio del bosco nel ${s.cut.year} a meno di 75 m (${Math.round(s.cut.frac * 100)}% dell'area): lì il micelio può mancare per anni.</div>` : '';
   const z = s.zone ? (state.analysis?.zones || []).find((x) => x.id === s.zone) : null;
   const stale = s.lastRainDays != null && s.lastRainDays > (s.staleDays || 20);
   const rain = s.lastRainDays != null
@@ -375,7 +376,7 @@ function spotPopup(s) {
         <div class="pop-sub">${s.elevation} m · ${s.aspectLabel} · ${s.slope}°</div></div>
     </div>
     <div class="pop-line">${rain}${road}</div>
-    ${isProven(s, state.analysis?.date) ? '<div class="alert ok small" style="margin:8px 0 0"><b>Zona provata</b>: entro 1,5 km hai già trovato porcini.</div>' : ''}${ban}${prot}${kill}
+    ${cut}${isProven(s, state.analysis?.date) ? '<div class="alert ok small" style="margin:8px 0 0"><b>Zona provata</b>: entro 1,5 km hai già trovato porcini.</div>' : ''}${ban}${prot}${kill}
     <div class="nav-row" style="margin-top:8px">
       <button class="btn small primary" data-walk-spot="${s.id}">${icon('walk')} A piedi qui</button>
       ${z ? `<button class="btn small primary" data-walk-zone="${z.id}">${icon('walk')} Giro zona ${z.id}</button>` : ''}
@@ -714,6 +715,8 @@ function renderResults() {
     if (ne) alerts.push(`<div class="alert warn">${ne} spot sono vicini a tue uscite a vuoto recenti: punteggio ridotto (la penalità svanisce in 3 settimane o se torna a piovere).</div>`);
   }
   if (a.scan?.maxSlope != null) alerts.push(`<div class="alert ok small">Solo spot con pendenza fino a <b>${a.scan.maxSlope}°</b> e senza scarpate vicine (limite modificabile in Opzioni). Le tue fungaie restano visibili anche se più ripide.</div>`);
+  if (a.scan?.excludedCut) alerts.push(`<div class="alert ok small">Esclusi <b>${a.scan.excludedCut} spot</b> in boschi tagliati dal ${a.scan.cutSince} in poi: dopo un taglio il micelio del porcino resta assente per anni.</div>`);
+  if (a.scan && a.scan.cutChecked === false) alerts.push('<div class="alert warn small">Mappa dei tagli (Global Forest Watch) non raggiungibile: gli spot non sono stati controllati per tagli recenti.</div>');
   if (a.scan?.excludedFar) alerts.push(`<div class="alert ok small">Esclusi ${a.scan.excludedFar} spot buoni ma a più di ${a.scan.maxWalk} minuti a piedi dalla strada più vicina (limite modificabile in Opzioni).</div>`);
   if (a.fungaie?.length) {
     const top = a.fungaie[0];
@@ -729,7 +732,7 @@ function renderResults() {
   if (!s.rainOk) alerts.push(`<div class="alert ${wetSpots ? 'warn' : 'bad'}">Pioggia in valle insufficiente: ${fmt1(s.rainTotal)} mm in 20 giorni (servono ${state.settings.rainMinMm} mm). ${wetSpots ? `In quota è piovuto di più: ${wetSpots} spot su ${a.spots.length} superano la soglia.` : 'Nemmeno in quota si arriva alla soglia: condizioni non ancora favorevoli.'}</div>`);
   if (s.meanMax > 30) alerts.push('<div class="alert warn">Caldo estremo in valle (medie delle massime oltre 30 °C): cerca in quota e sui versanti Nord.</div>');
   const killersAll = [...new Set(a.spots.flatMap((sp) => sp.killers))];
-  if (killersAll.length) alerts.push(`<div class="alert warn">“Killer” del bosco rilevati dopo l’ultima pioggia in alcune zone: <b>${killersAll.join(', ')}</b>. Lì il timer si ferma.</div>`);
+  if (killersAll.length) alerts.push(`<div class="alert warn">“Killer” del bosco rilevati dopo l’ultima pioggia in alcune zone: <b>${killersAll.join(', ')}</b>. Lì il timer si ferma o rallenta.</div>`);
   if (a.forestChecked && a.mapSrc?.forest === 'esri') alerts.push('<div class="alert ok small">Servizio Copernicus non raggiungibile: bosco e case verificati con la carta di riserva <b>Esri Land Cover 2025</b> (10 m). Non distingue latifoglie e conifere (decide la quota) e non valuta la densità della chioma.</div>');
   if (!a.forestChecked) alerts.push('<div class="alert warn"><b>Servizio Copernicus non raggiungibile</b> (manutenzione o guasto del server europeo): bosco, case e paesi non verificati, alcuni spot potrebbero cadere fuori dal bosco o vicino alle case. Riprova più tardi per un’analisi completa; le zone già calcolate restano salvate sul telefono.</div>');
   const learnN = state.learn?.n || 0;
@@ -797,7 +800,7 @@ function renderSpots() {
         <div class="m">${esc(s.forest)} · ${s.slope}° · ${distKm(a.center, s).toFixed(1)} km${s.access ? ` · strada ${s.access.walkMin} min` : ''}</div>
         ${(() => { const b = harvestBan(s.lat, s.lon, a.date); return b && !b.expired ? `<div class="m" style="color:var(${b.all ? '--danger' : '--warn'})">Raccolta vietata il ${b.day}${b.all ? '' : ' ai non residenti'} (Comune di ${esc(b.comune)})</div>` : ''; })()}
         ${s.protected ? `<div class="m" style="color:var(--danger)">${s.protected.strict ? 'Riserva integrale' : 'Area protetta'}: ${esc(s.protected.name)}</div>` : ''}
-        ${s.killers.length ? `<div class="m" style="color:var(--warn)">Timer fermo: ${s.killers.join(', ')}</div>` : ''}
+        ${s.killers.length ? `<div class="m" style="color:var(--warn)">Timer frenato: ${s.killers.join(', ')}</div>` : ''}
       </div>
     </div>`;
   el.innerHTML = (fung.length ? `<h3 style="margin-top:4px">Le tue fungaie nel raggio (${fung.length})</h3>${fung.map(card).join('')}<h3>Spot consigliati (${a.spots.length})</h3>` : '')

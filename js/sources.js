@@ -225,3 +225,51 @@ export function protectedAt(fc, lat, lon) {
   }
   return null;
 }
+
+// Tagli recenti: perdita di copertura arborea anno per anno (Hansen/UMD via Global Forest Watch, ~30 m, aggiornata
+// ogni anno). Parladé et al. 2017 (Soria): dopo un taglio, raso o parziale, il micelio del porcino crolla e per
+// almeno 3 anni non nasce nulla; il recupero richiede decenni. Tile PNG 512 px a z12 con CORS: canale blu = anno − 2000.
+const LOSS_URL = (x, y) => `https://tiles.globalforestwatch.org/umd_tree_cover_loss/latest/dynamic/12/${x}/${y}.png`;
+const LOSS_Z = 12, LOSS_TILE = 512;
+const lossTiles = new Map();
+let lossDownUntil = 0;
+async function lossTile(tx, ty) {
+  const k = tx + '/' + ty;
+  if (!lossTiles.has(k)) {
+    lossTiles.set(k, (async () => {
+      if (Date.now() < lossDownUntil) throw new Error('Global Forest Watch in pausa');
+      try {
+        const res = await fetch(LOSS_URL(tx, ty), { signal: AbortSignal.timeout(10000) });
+        if (res.status === 404) return null; // nessun taglio nel riquadro
+        if (!res.ok) throw new Error('GFW ' + res.status);
+        const bmp = await createImageBitmap(await res.blob());
+        const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(bmp.width, bmp.height) : Object.assign(document.createElement('canvas'), { width: bmp.width, height: bmp.height });
+        const ctx = c.getContext('2d');
+        ctx.drawImage(bmp, 0, 0);
+        const d = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+        const year = new Uint8Array(bmp.width * bmp.height);
+        for (let i = 0; i < year.length; i++) if (d[i * 4 + 3] > 0) year[i] = d[i * 4 + 2];
+        return { w: bmp.width, year };
+      } catch (e) { lossDownUntil = Date.now() + 10 * 60000; lossTiles.delete(k); throw e; }
+    })());
+  }
+  return lossTiles.get(k);
+}
+// Quota di bosco tagliato dal sinceYear in poi entro rM metri dal punto, e anno del taglio più recente
+export async function recentCut(lat, lon, sinceYear, rM = 75) {
+  const sc = LOSS_TILE / 256;
+  const gx = lon2px(lon, LOSS_Z) * sc, gy = lat2px(lat, LOSS_Z) * sc;
+  const mpp = (40075016.686 * Math.cos((lat * Math.PI) / 180)) / (LOSS_TILE * 2 ** LOSS_Z);
+  const r = Math.max(1, Math.round(rM / mpp)), stepPx = Math.max(1, Math.round(15 / mpp));
+  let n = 0, cut = 0, last = 0;
+  for (let dy = -r; dy <= r; dy += stepPx) for (let dx = -r; dx <= r; dx += stepPx) {
+    if (dx * dx + dy * dy > r * r) continue;
+    const px = Math.floor(gx + dx), py = Math.floor(gy + dy);
+    const t = await lossTile(Math.floor(px / LOSS_TILE), Math.floor(py / LOSS_TILE));
+    n++;
+    if (!t) continue;
+    const y = t.year[(py % LOSS_TILE) * t.w + (px % LOSS_TILE)];
+    if (y && 2000 + y >= sinceYear) { cut++; last = Math.max(last, 2000 + y); }
+  }
+  return { frac: n ? cut / n : 0, year: last || null };
+}

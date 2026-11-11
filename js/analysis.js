@@ -2,7 +2,7 @@
 import { GROUPS, FORESTS, SPECIES, BUILT_MIN_M, BLOCK_KM } from './config.js';
 import { loadMosaic, terrainAtPoint } from './dem.js';
 import { fetchDaily, subsoilTemp } from './weather.js';
-import { forestRaster, forestPatch, fetchProtected, protectedAt, builtRaster, nearBuiltGrid, canopyPatch, mapSource } from './sources.js';
+import { forestRaster, forestPatch, fetchProtected, protectedAt, builtRaster, nearBuiltGrid, canopyPatch, mapSource, recentCut } from './sources.js';
 import { distKm, bboxAround, aspectLabel, metersPerPixel, ASPECT_DEG, angDiff } from './geo.js';
 import { contourLines } from './contours.js';
 import { climateFor, tempClass, regimeOf } from './climate.js';
@@ -598,9 +598,19 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
   onStep('Controllo quanto sono lontani dalla strada…', 0.92);
   const maxWalk = s.maxWalkMin ?? 40;
   const final = [];
-  let excludedFar = 0;
+  let excludedFar = 0, excludedCut = 0, cutChecked = true;
+  // tagli degli ultimi 10 anni su almeno un quarto del bosco entro 75 m: spot escluso
+  const CUT_YEARS = 10, CUT_FRAC = 0.25;
+  const cutSince = Number(date.slice(0, 4)) - CUT_YEARS;
   for (const sp of ranked) {
     if (final.length >= s.maxSpots) break;
+    if (cutChecked) {
+      try {
+        const cut = await recentCut(sp.lat, sp.lon, cutSince);
+        if (cut.frac >= CUT_FRAC) { excludedCut++; continue; }
+        if (cut.year) sp.cut = cut; // taglio piccolo vicino: lo dico nella scheda
+      } catch { cutChecked = false; } // servizio non raggiungibile: niente controllo (lo segnalo)
+    }
     let road = null;
     try { road = await nearestRoad(sp.lat, sp.lon); } catch { road = null; }
     if (road) {
@@ -765,7 +775,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds = 
     date, center, radius, valleyElev,
     settings: { gradient: s.gradient, windowDays: s.windowDays, rainMinMm: s.rainMinMm, aspectPref: s.aspectPref || 'auto', forestPref: s.forestPref || 'auto' },
     summary, thermalRef, dayIndex, groups, timers, spots: final, fungaie, zones, overlay, contours,
-    scan: { areas: areas.length, fine: true, excludedFar, maxWalk, maxSlope },
+    scan: { areas: areas.length, fine: true, excludedFar, maxWalk, maxSlope, excludedCut, cutChecked, cutSince },
     protectedFc, forestChecked: !!forest, mapSrc: { ...mapSource }, demZoom: mosaic.z,
     clim, tc,
   };

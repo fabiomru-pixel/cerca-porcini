@@ -291,6 +291,18 @@ export function timerScore(daysSince, t) {
 }
 
 // Tempismo in un punto meteo (pioggia locale, timer, killer). cellElev per correggere Tmin/Tmax in quota.
+export const HEAT_SPIKE = { deltaC: 8, refDays: 10, effectDays: 19, factor: 0.65 };
+export function heatSpike(days, idx) {
+  let found = null;
+  for (let i = Math.max(HEAT_SPIKE.refDays, idx - HEAT_SPIKE.effectDays); i <= idx; i++) {
+    const ref = days.slice(i - HEAT_SPIKE.refDays, i).map((d) => d.tmax).filter((x) => x != null);
+    if (ref.length < 7 || days[i]?.tmax == null) continue;
+    const delta = days[i].tmax - ref.reduce((a, b) => a + b, 0) / ref.length;
+    if (delta >= HEAT_SPIKE.deltaC && (!found || delta > found.delta)) found = { date: days[i].date, delta: Math.round(delta) };
+  }
+  return found;
+}
+
 export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
   const days = wp.days;
   const idx = days.findIndex((d) => d.date === dateStr);
@@ -332,6 +344,11 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
     sc *= Math.pow(0.4, killers.length);
     best = { score: Math.max(0.05, sc), daysSince, killers, total: tr.total, weak: tr.weak };
   }
+  // Picco di caldo: una massima di 8 °C o più sopra la media dei 10 giorni prima frena i porcini per circa
+  // 3 settimane (Salerni et al. 2023, abetine del Monte Amiata: effetto negativo dal 1° al 19° giorno, attenuato
+  // nei boschi radi). Non ferma il timer: voto −35%.
+  const spike = heatSpike(days, idx);
+  if (spike) best = { ...best, score: Math.max(0.05, best.score * HEAT_SPIKE.factor), killers: [...best.killers, `picco di caldo (+${spike.delta} °C il ${spike.date.slice(8)}/${spike.date.slice(5, 7)})`] };
   const soil = soilState(days, idx, rainTotal, s, learn);
   // vento dall'ultima pioggia utile (o negli ultimi 20 giorni se non ce n'è)
   const lastEp = eps[eps.length - 1];
