@@ -1,0 +1,83 @@
+diff --git a/js/analysis.js b/js/analysis.js
+index 92f292c..eca9845 100644
+--- a/js/analysis.js
++++ b/js/analysis.js
+@@ -326,6 +326,14 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds =
+       if (out.length >= 3) break;
+       if (out.every((o) => distKm(o, x) >= 0.4)) out.push(x);
+     }
++    // area dello spot: i punti entro 500 m con almeno il 60% del suo valore (per la colorazione sulla mappa)
++    for (const o of out) {
++      o.heat = cells
++        .filter((x) => x.fin >= 0.6 * o.fin && distKm(o, x) <= 0.5)
++        .slice(0, 700)
++        .map((x) => [Math.round(x.lat * 1e5) / 1e5, Math.round(x.lon * 1e5) / 1e5, Math.round(Math.max(0, Math.min(1, (x.fin / o.fin - 0.6) / 0.4)) * 100)]); // 0 = 60% dello spot, 100 = come lo spot
++      o.heatCell = Math.round(st * mppF); // passo della griglia in metri
++    }
+     return out.length ? out : [c];
+   };
+ 
+@@ -472,6 +480,7 @@ export async function runAnalysis({ lat, lon, date, settings: s, learn, finds =
+         tLocal: Math.round(best.pl.tLocal * 10) / 10,
+         forest: FORESTS[fk].label,
+         forestType: c.patch ? `${c.patch.type}, copertura ${Math.round(c.patch.frac * 100)}%` : null,
++        heat: c.heat || null, heatCell: c.heatCell || 30,
+         edge: edge > 1,
+         rainTotal: Math.round(tm.rainTotal),
+         daysSince: tm.daysSince,
+diff --git a/js/app.js b/js/app.js
+index a5b2721..6dbd949 100644
+--- a/js/app.js
++++ b/js/app.js
+@@ -77,6 +77,7 @@ function initMap() {
+   for (const [k, l] of Object.entries(TILE_LAYERS)) bases[l.name] = layers[k] = L.tileLayer(l.url, l.opts);
+   layers.topo.addTo(map);
+   layers.suit = L.layerGroup().addTo(map);
++  layers.heat = L.layerGroup().addTo(map);
+   layers.contours = L.layerGroup().addTo(map);
+   layers.prot = L.layerGroup().addTo(map);
+   layers.spots = L.layerGroup().addTo(map);
+@@ -85,6 +86,7 @@ function initMap() {
+   layers.car = L.layerGroup().addTo(map);
+   L.control.layers(bases, {
+     'Idoneità (calore)': layers.suit,
++    'Area probabile degli spot': layers.heat,
+     'Fascia di quota': layers.contours,
+     'Aree protette': layers.prot,
+     'Spot consigliati': layers.spots,
+@@ -317,7 +319,7 @@ function spotPopup(s) {
+ }
+ 
+ function drawAnalysis(a, fit = false) {
+-  layers.suit.clearLayers(); layers.contours.clearLayers(); layers.prot.clearLayers(); layers.spots.clearLayers();
++  layers.suit.clearLayers(); layers.heat?.clearLayers(); layers.contours.clearLayers(); layers.prot.clearLayers(); layers.spots.clearLayers();
+   if (radiusCircle) { radiusCircle.remove(); radiusCircle = null; } // l'analisi disegna già il suo cerchio
+   if (!a) return;
+   L.imageOverlay(a.overlay.url, a.overlay.bounds, { opacity: 0.55, interactive: false }).addTo(layers.suit);
+@@ -333,6 +335,26 @@ function drawAnalysis(a, fit = false) {
+       onEachFeature: (f, l) => l.bindPopup(`<b>${esc(f.properties.siteName)}</b><br>Area protetta (${esc(f.properties.nationalId || '')}, IUCN ${esc(f.properties.iucnCategory || '-')})<br><span class="muted">Controlla il regolamento: la raccolta può essere vietata o limitata.</span>`),
+     }).addTo(layers.prot);
+   }
++  // area probabile attorno a ogni spot: più è intenso il colore, più il punto è promettente
++  layers.heat.clearLayers();
++  const heatR = L.canvas({ padding: 0.3 });
++  const heatColor = (v) => { // da verde salice (meno probabile) a oro e arancio (più probabile)
++    const stops = [[0, [138, 203, 136]], [0.6, [255, 191, 70]], [1, [232, 89, 12]]];
++    const t = Math.max(0, Math.min(1, v));
++    for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
++      const [a0, c0] = stops[i - 1], [a1, c1] = stops[i], k = (t - a0) / (a1 - a0);
++      return `rgb(${c0.map((x, j) => Math.round(x + (c1[j] - x) * k)).join(',')})`;
++    }
++    return 'rgb(232,89,12)';
++  };
++  for (const s of a.spots) {
++    if (!s.heat) continue;
++    const r = Math.max(18, (s.heatCell || 30) * 1.05); // cerchi che si sovrappongono: sfumatura continua
++    for (const [la, lo, p] of s.heat) {
++      const v = p / 100;
++      L.circle([la, lo], { renderer: heatR, radius: r, stroke: false, fillColor: heatColor(v), fillOpacity: 0.03 + 0.32 * Math.pow(v, 1.4), interactive: false }).addTo(layers.heat);
++    }
++  }
+   for (const s of a.spots) {
+     const m = L.marker([s.lat, s.lon], {
+       icon: L.divIcon({ className: '', html: `<div class="spot-pin" style="background:${scoreColor(s.score)};color:${scoreFg(s.score)}${s.protected ? ';border-color:#dc2626' : ''}"><span>${s.score}</span></div>`, iconSize: [34, 34], iconAnchor: [17, 34], popupAnchor: [0, -30] }),

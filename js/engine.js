@@ -291,7 +291,7 @@ export function timerScore(daysSince, t) {
 }
 
 // Tempismo in un punto meteo (pioggia locale, timer, killer). cellElev per correggere Tmin/Tmax in quota.
-export const HEAT_SPIKE = { deltaC: 8, refDays: 10, effectDays: 19, factor: 0.65 };
+export const HEAT_SPIKE = { deltaC: 5.5, refDays: 10, effectDays: 19, factor: 0.65 };
 export function heatSpike(days, idx) {
   let found = null;
   for (let i = Math.max(HEAT_SPIKE.refDays, idx - HEAT_SPIKE.effectDays); i <= idx; i++) {
@@ -344,7 +344,8 @@ export function evalTiming(wp, dateStr, s, forestKey, cellElev, learn) {
     sc *= Math.pow(0.4, killers.length);
     best = { score: Math.max(0.05, sc), daysSince, killers, total: tr.total, weak: tr.weak };
   }
-  // Picco di caldo: una massima di 8 °C o più sopra la media dei 10 giorni prima frena i porcini per circa
+  // Picco di caldo: una massima di 5,5 °C o più sopra la media dei 10 giorni prima (lo studio usa 8 °C misurati da
+  // stazione; i modelli meteo smussano i picchi e qui non superano +4–6 °C, quindi soglia abbassata) frena i porcini per circa
   // 3 settimane (Salerni et al. 2023, abetine del Monte Amiata: effetto negativo dal 1° al 19° giorno, attenuato
   // nei boschi radi). Non ferma il timer: voto −35%.
   const spike = heatSpike(days, idx);
